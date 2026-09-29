@@ -1,3 +1,32 @@
+# chidekina/gsd-core - local fork
+
+Fork of [open-gsd/gsd-core](https://github.com/open-gsd/gsd-core). Default branch is `local`, cut from the release tag `v1.15.0` (`b10ab3fd`). `next` is upstream's pre-release line and is never a base. Decision record: ADR-0135 in the harness repo (reopens ADR-0110).
+
+## Local patches (`[gsd-local]` commits, one file each)
+
+| file | what it does |
+|---|---|
+| `gsd-core/templates/phase-prompt.md` | documents the task-level `parallel="true"` attribute |
+| `gsd-core/workflows/execute-plan.md` | Within-Plan Parallel Task Groups section (dispatch of adjacent `parallel="true"` tasks) |
+| `gsd-core/workflows/new-project.md` | section 5.05 Gate Zero, section 8.5 Master BRD, Master BRD row in the done table |
+| `gsd-core/workflows/pr-branch.md` | `nick_nope_gate` step; needs the user agent `~/.claude/agents/gsd-nick-nope.md`, which this package does not ship |
+| `agents/gsd-plan-checker.md` | calls `verify.plan-structure` instead of `plan.task-structure`, a verb the entrypoint does not register |
+
+The phase-prompt and execute-plan patches have zero current uses; they were kept on purpose (operator decision 2026-09-28).
+
+## Upgrading: only by trigger, never by calendar
+
+There is NO scheduled or cadence-based upgrade. Upstream publishes about 3 releases a week; a fixed cadence would mean rebasing constantly for nothing. Nobody runs `/gsd-update`-style installs into `~/.claude` in place. Rebase only when an upstream fix affects us (trigger 1 of ADR-0110):
+
+1. `git fetch upstream --tags`
+2. `git rebase --onto <new-tag> <old-tag> local`. A conflict on a `[gsd-local]` commit names the file; resolve it there.
+3. Build and install into a sandbox first: `npm ci --ignore-scripts && npm run build:lib`, then run the installer with `--config-dir <scratch> --no-legacy-cleanup`, and diff the result against the live `~/.claude` before any swap.
+4. Push `local` and confirm `git ls-remote origin local` equals `git rev-parse local`.
+
+Rollback: the previous install is kept as `~/.cache/gsd-rollback/get-shit-done-cc-1.42.3.tgz`; procedure in ADR-0135 and the phase 159 CONTEXT.
+
+---
+
 <div align="center">
 
 # GSD Core
