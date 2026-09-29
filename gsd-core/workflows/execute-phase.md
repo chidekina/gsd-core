@@ -28,6 +28,7 @@ Orchestrator coordinates, not executes. Each subagent loads the full execute-pla
 - **Codex:** native subagent sessions can end abnormally (`turn_aborted`) after the plan
   work is already committed. Completion is decided by the step-4 artifact reconciliation
   (SUMMARY + matching recent commits), not by the session's terminal state (#4217).
+@$HOME/.claude/get-shit-done/references/brd-spec-context.md
 - **Other runtimes:** If `Agent`/`agent` tool is genuinely unavailable (e.g. a backgrounded
   Claude Code agent per #853, or a non-Claude runtime), use sequential inline execution as
   the fallback for executor parallelization only. If `Agent` IS available (top-level Claude
@@ -61,8 +62,7 @@ Always use the exact name from this list — do not fall back to 'general-purpos
 - gsd-integration-checker — Checks cross-phase integration
 - gsd-nyquist-auditor — Validates verification coverage
 - gsd-ui-researcher — Researches UI/UX approaches
-- gsd-ui-checker — Reviews UI implementation quality
-- gsd-ui-auditor — Audits UI against design requirements
+- ui-quality — Unified UI quality agent (mode=gate verifies UI-SPEC.md; mode=audit scores implemented UI)
 </available_agent_types>
 
 <process>
@@ -89,6 +89,13 @@ Load all context in one call:
 ```bash
 WAVE_PARAM=""; if [[ "$ARGUMENTS" =~ (^|[[:space:]])--wave[[:space:]]+([^[:space:]-][^[:space:]]*) ]]; then WAVE_PARAM="--wave ${BASH_REMATCH[2]}"; fi
 INIT=$(gsd_run query init.execute-phase "${PHASE_ARG}" $WAVE_PARAM)
+
+**BRD + SPEC comparison (per brd-spec-context.md):**
+```bash
+PHASE_BRD=$(ls "${phase_dir}"/*-BRD.md 2>/dev/null | head -1 || true)
+PHASE_SPEC=$(ls "${phase_dir}"/*-SPEC.md 2>/dev/null | grep -v AI-SPEC | head -1 || true)
+```
+If either exists: read them now. Cross-check each plan's goal against BRD business rules and SPEC acceptance criteria. Flag any divergence (per the divergence handling protocol in brd-spec-context.md) BEFORE spawning any executor agent. Pass `PHASE_BRD` and `PHASE_SPEC` paths as additional `<files_to_read>` in every executor subagent prompt so executors can self-check their work against the business contract.
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 AGENT_SKILLS=$(gsd_run query agent-skills gsd-executor)
 ```
