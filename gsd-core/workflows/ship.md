@@ -259,7 +259,21 @@ For each SUMMARY.md in the phase directory:
 {Decisions from STATE.md accumulated context relevant to this phase}
 ```
 
-**7. Configured project sections:**
+**7. Business context section (from BRD):**
+```bash
+BRD_FILE=$(ls "${PHASE_DIR}"/*-BRD.md 2>/dev/null | head -1 || true)
+```
+If `BRD_FILE` exists:
+```markdown
+## Business Context
+
+**Personas:** {personas from BRD ## Stakeholders & Personas}
+**Key Rules:** {top 3 business rules from BRD ## Business Rules — numbered}
+**Conflicts resolved:** {count from BRD ## Conflicts Resolved, or "none"}
+```
+If no BRD: omit section silently.
+
+**8. Configured project sections:**
 Read append-only project-specific PRD/PR body sections from config:
 
 ```bash
@@ -576,6 +590,40 @@ Read the `activeHooks` array directly from `SHIP_POST_HOOKS_JSON` in-context (do
 Each dispatch is best-effort: if it errors, record a warning and continue — never re-raise (`onError: skip`).
 </step>
 
+<step name="aria_sync">
+After PR is created and STATE.md updated, sync the ship event to ARIA.
+
+**Read ARIA config:**
+```bash
+ARIA_ENABLED=$(gsd-sdk query config-get hooks.aria_sync 2>/dev/null || echo "true")
+```
+
+If `ARIA_ENABLED` is not explicitly `"false"`: attempt ARIA sync (opt-out model — enabled by default when ARIA MCP is available).
+
+**Step 1 — Log interaction (aethos-clients MCP):**
+Use `mcp__aethos-clients__aethos_log_interaction` if available:
+- `type`: "shipped"
+- `summary`: "Phase ${PHASE_NUMBER} (${PHASE_NAME}) shipped — PR #${PR_NUMBER}"
+- `details`: PR URL, branch, commit count, verification status
+
+If the tool is unavailable or errors: skip silently — ARIA sync is best-effort, never blocks shipping.
+
+**Step 2 — Create ARIA task for PR review:**
+Use `mcp__aria__aria_create_task` if available:
+- `title`: "Review PR #${PR_NUMBER}: Phase ${PHASE_NUMBER} — ${PHASE_NAME}"
+- `description`: "PR created at ${PR_URL}. Branch: ${CURRENT_BRANCH}. Verify CI passes and merge."
+- `priority`: "medium"
+- `tags`: ["gsd-ship", "pr-review", "${PROJECT_CODE}"]
+
+If `PROJECT_CODE` is not available, omit the tag.
+If the tool is unavailable or errors: skip silently.
+
+**Report sync status inline (one line):**
+- Both succeeded: `ARIA ✓ interaction logged, task created`
+- Partial: `ARIA ⚠ [what succeeded / what was skipped]`
+- All skipped: omit line entirely (no noise)
+</step>
+
 <step name="report">
 ```
 ---
@@ -613,5 +661,6 @@ After shipping:
 - [ ] Branch pushed to remote
 - [ ] PR created with rich auto-generated body
 - [ ] STATE.md updated with shipping status
+- [ ] ARIA sync attempted (interaction + task) — best-effort, never blocks
 - [ ] User knows PR number and next steps
 </success_criteria>
