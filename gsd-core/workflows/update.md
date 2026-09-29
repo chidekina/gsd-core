@@ -9,6 +9,21 @@ Read all files referenced by the invoking prompt's execution_context before star
 <process>
 **If `response_language` is configured:** All user-facing output of this workflow — narration between tool calls, status updates, progress notes, findings, questions, prompts, and explanations — MUST be presented in that language. Technical terms, code, file paths, and subagent prompts stay in English — only user-facing output is translated.
 
+<step name="fork_lockdown" priority="first">
+**This install is the `chidekina/gsd-core` fork (branch `local`), and `/gsd-update` is DISABLED here.** [gsd-local]
+
+The steps below run `npx @opengsd/gsd-core@<tag> ... --global` (upstream, no `--config-dir`, no `--no-legacy-cleanup`), which would overwrite the fork's `[gsd-local]` patches and let the installer delete user files. Do NOT run any later step of this workflow.
+
+Print exactly this and STOP:
+
+```
+/gsd-update is disabled: this install is the chidekina/gsd-core fork (branch local).
+Upgrades are a deliberate rebase of the fork, not an in-place upstream install.
+Procedure: README.md ("Local patches" and the rebase steps) in https://github.com/chidekina/gsd-core (branch local),
+decision record ADR-0135. Nothing was changed.
+```
+</step>
+
 <step name="get_installed_version">
 Detect the installed GSD version, scope, runtime, and config dir.
 
