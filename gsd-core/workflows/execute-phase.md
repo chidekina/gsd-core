@@ -28,7 +28,6 @@ Orchestrator coordinates, not executes. Each subagent loads the full execute-pla
 - **Codex:** native subagent sessions can end abnormally (`turn_aborted`) after the plan
   work is already committed. Completion is decided by the step-4 artifact reconciliation
   (SUMMARY + matching recent commits), not by the session's terminal state (#4217).
-@$HOME/.claude/get-shit-done/references/brd-spec-context.md
 - **Other runtimes:** If `Agent`/`agent` tool is genuinely unavailable (e.g. a backgrounded
   Claude Code agent per #853, or a non-Claude runtime), use sequential inline execution as
   the fallback for executor parallelization only. If `Agent` IS available (top-level Claude
@@ -89,6 +88,13 @@ Load all context in one call:
 ```bash
 WAVE_PARAM=""; if [[ "$ARGUMENTS" =~ (^|[[:space:]])--wave[[:space:]]+([^[:space:]-][^[:space:]]*) ]]; then WAVE_PARAM="--wave ${BASH_REMATCH[2]}"; fi
 INIT=$(gsd_run query init.execute-phase "${PHASE_ARG}" $WAVE_PARAM)
+if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
+AGENT_SKILLS=$(gsd_run query agent-skills gsd-executor)
+```
+
+Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `padded_phase`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `phase_req_ids`, `response_language`, `requirements_path`, `section_manifest`, `threat_id_duplicate_count`.
+
+@$HOME/.claude/get-shit-done/references/brd-spec-context.md
 
 **BRD + SPEC comparison (per brd-spec-context.md):**
 ```bash
@@ -96,11 +102,6 @@ PHASE_BRD=$(ls "${phase_dir}"/*-BRD.md 2>/dev/null | head -1 || true)
 PHASE_SPEC=$(ls "${phase_dir}"/*-SPEC.md 2>/dev/null | grep -v AI-SPEC | head -1 || true)
 ```
 If either exists: read them now. Cross-check each plan's goal against BRD business rules and SPEC acceptance criteria. Flag any divergence (per the divergence handling protocol in brd-spec-context.md) BEFORE spawning any executor agent. Pass `PHASE_BRD` and `PHASE_SPEC` paths as additional `<files_to_read>` in every executor subagent prompt so executors can self-check their work against the business contract.
-if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
-AGENT_SKILLS=$(gsd_run query agent-skills gsd-executor)
-```
-
-Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `padded_phase`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `phase_req_ids`, `response_language`, `requirements_path`, `section_manifest`, `threat_id_duplicate_count`.
 
 **Threat-ID gate (#4683):** if `threat_id_duplicate_count` is non-zero, read and execute `execute-phase/steps/threat-id-gate.md` BEFORE any dispatch — it is a hard stop (the full duplicate list is in `threat_id_duplicates`).
 
