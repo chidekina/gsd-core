@@ -48,7 +48,7 @@ Model profiles control which Claude model each GSD agent uses. This allows balan
 | `discuss` | `gsd-assumptions-analyzer` |
 | `research` | gsd-phase-researcher, gsd-project-researcher, gsd-research-synthesizer, gsd-codebase-mapper, gsd-ui-researcher |
 | `execution` | gsd-executor, gsd-debugger, gsd-doc-writer |
-| `verification` | gsd-verifier, gsd-plan-checker, gsd-integration-checker, gsd-nyquist-auditor, gsd-ui-checker, gsd-ui-auditor, gsd-doc-verifier, gsd-code-reviewer |
+| `verification` | gsd-verifier, gsd-plan-checker, gsd-integration-checker, gsd-nyquist-auditor, ui-quality, gsd-doc-verifier, gsd-code-reviewer |
 | `completion` | (reserved — no subagent today) |
 
 ### Resolution precedence (highest to lowest)
@@ -187,7 +187,7 @@ When `dynamic_routing.enabled = true` in `.planning/config.json`, the resolver p
 
 | Tier | Agents | Use case |
 |---|---|---|
-| `light` | gsd-codebase-mapper, gsd-pattern-mapper, gsd-research-synthesizer, gsd-plan-checker, gsd-integration-checker, gsd-nyquist-auditor, gsd-ui-checker, gsd-ui-auditor, gsd-doc-verifier | Cheap/fast — pure mappers, scanners, low-stakes audits |
+| `light` | gsd-codebase-mapper, gsd-pattern-mapper, gsd-research-synthesizer, gsd-plan-checker, gsd-integration-checker, gsd-nyquist-auditor, ui-quality, gsd-doc-verifier | Cheap/fast — pure mappers, scanners, low-stakes audits |
 | `standard` | gsd-executor, gsd-phase-researcher, gsd-project-researcher, gsd-verifier, gsd-doc-writer, gsd-ui-researcher | Default workhorse — research, writing, primary verification |
 | `heavy` | gsd-planner, gsd-roadmapper, gsd-debugger | Deep reasoning — already at top, can't escalate further |
 
