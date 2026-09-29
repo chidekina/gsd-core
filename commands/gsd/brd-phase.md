@@ -1,5 +1,5 @@
 ---
-name: gsd-brd-phase
+name: gsd:brd-phase
 description: "Generate BRD.md for a phase — business rules, personas, screen flows, conflict detection vs prior BRDs"
 argument-hint: "<phase> [--auto] [--from-code] [--text]"
 allowed-tools:
