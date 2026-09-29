@@ -230,6 +230,54 @@ After processing all selected sub-repos, remove the temp file and continue to
 `analyze_commits` for the root repo.
 </step>
 
+<step name="nick_nope_gate">
+Run Nick Nope pre-flight scan before creating the PR branch.
+
+```bash
+NICK_NOPE_ENABLED=$(gsd_run query config-get workflow.nick_nope 2>/dev/null || echo "true")
+```
+
+**If `NICK_NOPE_ENABLED` is `"false"`:** Skip this step silently.
+
+**Otherwise:** Spawn gsd-nick-nope agent with:
+- Full branch diff scope (`BASE` to `HEAD`)
+- depth: `quick` (fast gate, not full scan)
+- No `--save` flag (gate mode — don't persist)
+
+Display while scanning:
+```
+🔍 Nick Nope scanning for known mistakes...
+```
+
+**If `blocked: true` (critical findings):**
+
+Show findings inline:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 🚨 NICK NOPE — {N} critical issue(s) found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{critical finding titles list}
+
+Fix these before creating the PR branch.
+```
+
+Ask user (AskUserQuestion or plain text if TEXT_MODE):
+- question: "Critical issues found. Proceed anyway or fix first?"
+- options:
+  - "Fix first — abort PR branch" (description: "Go fix the issues, then re-run /gsd-pr-branch")
+  - "Proceed anyway" (description: "Create PR branch despite critical nopes — I know what I'm doing")
+
+If "Fix first": abort workflow, show `Run /nick-nope for full details.`
+If "Proceed anyway": continue with a visible warning: `⚠️  Proceeding with {N} unresolved critical nope(s) on record.`
+
+**If `blocked: false`:**
+```
+✅ Nick Nope: nothing critical. Proceeding...
+```
+Continue to analyze_commits step.
+</step>
+
 <step name="analyze_commits">
 Classify commits:
 
