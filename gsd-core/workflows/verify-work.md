@@ -60,6 +60,18 @@ Parse JSON for: `planner_model`, `checker_model`, `commit_docs`, `phase_found`, 
 # so we omit --cli-flag — the verb falls through roadmap → config → false.
 MVP_MODE=$(gsd_run query phase.mvp-mode "${phase_number}" ${GSD_WS} --pick active)
 ```
+
+**Load BRD for business rule verification:**
+```bash
+BRD_FILE=$(ls "${phase_dir}"/*-BRD.md 2>/dev/null | head -1 || true)
+```
+
+If `BRD_FILE` exists:
+- Read it and extract all entries from `## Business Rules` section
+- Store as `brd_rules` list — used in UAT generation to add business-rule checks
+- Log: `BRD.md found — ${N} business rules will be verified`
+
+If no `BRD_FILE`: continue normally (BRD is optional, no warning needed here — plan-phase already warned).
 </step>
 
 <step name="verify_pre_hooks">
@@ -283,6 +295,16 @@ Examples:
   → Expected: "Clicking Reply opens inline composer below comment. Submitting shows reply nested under parent with visual indentation."
 
 Skip internal/non-observable items (refactors, type changes, etc.).
+
+**Business rule verification injection (from BRD):**
+
+If `brd_rules` is non-empty (BRD was loaded in init step): append one test per business rule after the SUMMARY-derived tests:
+
+For each rule in `brd_rules`:
+- name: "Business Rule: [rule short label]"
+- expected: "[rule condition] → [rule outcome]. Verify the system enforces this."
+
+These tests confirm that implemented behavior matches the documented business contract, not just the technical spec.
 
 **Cold-start smoke test injection:**
 
