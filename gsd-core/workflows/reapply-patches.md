@@ -2,6 +2,15 @@
 
 # Reapply Local Patches Workflow
 
+**[gsd-local] FORK LOCKDOWN (ADR-0135): this workflow is DISABLED on the chidekina/gsd-core fork.** It is reachable only through `/gsd-update --sync|--reapply` or its own command, and it would either rewrite installed skills across runtime roots or 3-way merge stale `gsd-local-patches/` backups (baseline 1.38.5) into the fork's agents. Print exactly the message below and STOP; do not run any later step.
+
+```
+/gsd-update is disabled: this install is the chidekina/gsd-core fork (branch local).
+Upgrades are a deliberate rebase of the fork, not an in-place upstream install.
+Procedure: README.md ("Local patches" and the rebase steps) in https://github.com/chidekina/gsd-core (branch local),
+decision record ADR-0135. Nothing was changed.
+```
+
 Invoked by `/gsd:update --reapply` (`commands/gsd/update.md`).
 
 After a GSD update wipes and reinstalls files, this workflow merges user's previously saved local modifications back into the new version. Uses three-way comparison (pristine baseline, user-modified backup, newly installed version) to reliably distinguish user customizations from version drift.

@@ -1,49 +1,26 @@
 ---
 name: gsd:update
-description: Update GSD to latest version with changelog display
+description: "Disabled on this fork: refuses and points at the fork rebase procedure"
 argument-hint: "[--sync | --reapply | --next | --rc]"
 allowed-tools:
   - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
-  - AskUserQuestion
 ---
 
 <objective>
-Check for GSD updates, install if available, and display what changed.
-
-Routes to the update workflow which handles:
-- Version detection (local vs global installation)
-- npm version checking
-- Changelog fetching and display
-- User confirmation with clean install warning
-- Update execution and cache clearing
-- Restart reminder
+**[gsd-local] `/gsd-update` is DISABLED on the chidekina/gsd-core fork (ADR-0135), for EVERY argument.** The upstream flow would install the upstream package over the fork's `[gsd-local]` patches (`npx @opengsd/gsd-core@<tag> ... --global`, no `--config-dir`), `--reapply` would 3-way merge stale `gsd-local-patches/` backups into the fork's agents, and `--sync` would rewrite installed skills across runtime roots.
 </objective>
 
-<execution_context>
-@~/.claude/gsd-core/workflows/update.md
-</execution_context>
-
 <flags>
-- **--sync**: Sync managed GSD skills across runtime roots so multi-runtime users stay aligned after an update. Runs the sync-skills workflow (--from, --to, --dry-run, --apply flags supported).
-- **--reapply**: Reapply local modifications after a GSD update. Uses three-way comparison (pristine baseline, user-modified backup, newly installed version) to merge user customizations back. Runs the reapply-patches workflow.
-- **--next** (alias **--rc**): Target the `@next` RC dist-tag instead of `@latest` so you can install or refresh a release candidate (e.g. `1.4.0-rc.1`) through the normal update flow — scope/runtime detection, changelog preview, custom-file backup, and cache clearing all still apply. Omitting it keeps targeting `@latest` (no change). See ADR #660 for the RC channel.
-- **(no flag)**: Standard update — check for new version, show changelog, install.
+Every flag ends at the same refusal: `--sync`, `--reapply`, `--next`, `--rc`, and no flag.
 </flags>
 
 <process>
-Parse the first token of $ARGUMENTS:
-- If it is `--sync`: strip the flag, execute the sync-skills workflow (passing remaining args for --from/--to/--dry-run/--apply).
-- If it is `--reapply`: strip the flag, execute the reapply-patches workflow.
-- Otherwise (including `--next` / `--rc`): execute the update workflow end-to-end, passing `$ARGUMENTS` through so the workflow's parse_update_channel step can select the release channel.
+Ignore `$ARGUMENTS`. Do NOT read or execute any workflow (`update.md`, `sync-skills.md`, `reapply-patches.md`). Print exactly this and STOP:
 
+```
+/gsd-update is disabled: this install is the chidekina/gsd-core fork (branch local).
+Upgrades are a deliberate rebase of the fork, not an in-place upstream install.
+Procedure: README.md ("Local patches" and the rebase steps) in https://github.com/chidekina/gsd-core (branch local),
+decision record ADR-0135. Nothing was changed.
+```
 </process>
-
-<execution_context_extended>
-@~/.claude/gsd-core/workflows/sync-skills.md
-@~/.claude/gsd-core/workflows/reapply-patches.md
-</execution_context_extended>

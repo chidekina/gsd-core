@@ -102,7 +102,7 @@ UPDATE_TARGET_UNRESOLVED
 
 GSD could not resolve an installed update target. No update was performed.
 
-Rerun from a valid installed runtime: `/gsd:update`. For a fresh installation, run `npx -y --package=@opengsd/gsd-core@latest -- gsd-core --global`.
+This fork is not installed or updated by `npx`: see the fork README ("Local patches" and the rebase steps, https://github.com/chidekina/gsd-core, branch local).
 ```
 
 Exit.
@@ -180,7 +180,7 @@ fi
 ```text
 Couldn't check for updates (reason: {LATEST_REASON}, exit: {LATEST_STATUS}).
 
-To update manually: `npx -y --package=@opengsd/gsd-core@{TAG} -- gsd-core --global`
+Upgrades of this fork are a deliberate rebase (fork README); there is no manual `npx` update.
 ```
 
 Exit.
@@ -400,14 +400,10 @@ Build runtime flag from step 1:
 RUNTIME_FLAG="--$TARGET_RUNTIME"
 ```
 
-**If LOCAL install:**
+**[gsd-local] The upstream install commands were removed (fork lockdown, ADR-0135).** This step never installs anything:
 ```bash
-npx -y --package=@opengsd/gsd-core@"$TAG" -- gsd-core "$RUNTIME_FLAG" --local
-```
-
-**If GLOBAL install:**
-```bash
-npx -y --package=@opengsd/gsd-core@"$TAG" -- gsd-core "$RUNTIME_FLAG" --global
+echo "ERROR: /gsd-update is disabled on the chidekina/gsd-core fork; see README (rebase procedure)." >&2
+exit 1
 ```
 
 Capture output. If install fails, show error and exit.
