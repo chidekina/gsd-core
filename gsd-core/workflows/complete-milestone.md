@@ -674,7 +674,7 @@ Structure:
 
 Add to the safety commit:
 ```bash
-gsd-sdk query commit "docs: archive BRDs + SPECs for v[X.Y] milestone" --files "${BRD_ARCHIVE}"
+gsd_run query commit "docs: archive BRDs + SPECs for v[X.Y] milestone" --files "${BRD_ARCHIVE}"
 ```
 
 </step>
