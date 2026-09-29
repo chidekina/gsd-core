@@ -12,6 +12,18 @@ Fork of [open-gsd/gsd-core](https://github.com/open-gsd/gsd-core). Default branc
 | `gsd-core/workflows/pr-branch.md` | `nick_nope_gate` step; needs the user agent `~/.claude/agents/gsd-nick-nope.md`, which this package does not ship |
 | `agents/gsd-plan-checker.md` | calls `verify.plan-structure` instead of `plan.task-structure`, a verb the entrypoint does not register |
 
+Added 2026-09-29 (full triage of every local edit vs a pristine 1.42.3 install; the per-file port list with proofs is `159-TRIAGE-2.md` in the harness repo, one `[gsd-local]` commit per file, `git log v1.15.0..local --grep gsd-local`):
+
+| area | what it does |
+|---|---|
+| `gsd-core/workflows/_runtime-launcher.snippet.sh` + every inlined copy + `references/gsd-run-resolver.md` | `gsd_run` calls `~/.local/bin/gsd-sdk` (the Phase 139 effect wrapper, `GSD_SDK_REAL=$GSD_TOOLS`) when it is executable; fallback is the direct call; `GSD_SKIP_SDK_WRAP=1` disables. Do not run `npm run sync:launcher` blindly: it also moves an unrelated upstream preamble in `code-review-disposition.md` |
+| `gsd-core/workflows/update.md` | `/gsd-update` REFUSES (step `fork_lockdown`): it would install the upstream package over these patches |
+| `hooks/gsd-check-update-worker.js`, `hooks/gsd-statusline.js` | no registry lookup, `update_available` is always false; "stale hooks" points here, not at `/gsd-update` |
+| `gsd-core/{workflows/brd-phase.md,templates/brd.md,references/brd-spec-context.md}`, `commands/gsd/brd-phase.md`, `agents/gsd-nick-nope.md` | BRD/SPEC feature files owned by this fork, so the legacy cleanup cannot delete the skill that includes them |
+| BRD/SPEC, memory-mapper, ui-quality, destructive-git, SGND, AUTO-01/02 edits | see the triage; workflows plan/discuss/execute/verify/ship/complete/resume/pause, agents verifier/planner/plan-checker and friends, hooks check-update/phase-boundary/session-state/workflow-guard |
+
+Rebase note: on a conflict in any of the above the `[gsd-local]` side wins unless upstream absorbed the change (then drop our commit and say so in the triage).
+
 The phase-prompt and execute-plan patches have zero current uses; they were kept on purpose (operator decision 2026-09-28).
 
 ## Upgrading: only by trigger, never by calendar
