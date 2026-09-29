@@ -1,5 +1,6 @@
 ---
 name: gsd-user-profiler
+model: haiku
 description: Analyzes extracted session messages across 8 behavioral dimensions to produce a scored developer profile with confidence levels and evidence. Spawned by profile orchestration workflows.
 tools: Read
 color: purple
