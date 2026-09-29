@@ -595,7 +595,7 @@ After PR is created and STATE.md updated, sync the ship event to ARIA.
 
 **Read ARIA config:**
 ```bash
-ARIA_ENABLED=$(gsd-sdk query config-get hooks.aria_sync 2>/dev/null || echo "true")
+ARIA_ENABLED=$(gsd_run query config-get hooks.aria_sync 2>/dev/null || echo "true")
 ```
 
 If `ARIA_ENABLED` is not explicitly `"false"`: attempt ARIA sync (opt-out model — enabled by default when ARIA MCP is available).
