@@ -140,14 +140,12 @@ if (configDir) {
 // through the shell-projection seam, which already owns the Windows shell-flag
 // policy, the timeout, and semver validation. A non-ok result leaves latest
 // null, exactly as the previous inline try/catch did.
+// [gsd-local] fork policy (ADR-0135): this install tracks chidekina/gsd-core `local`, never upstream
+// releases, so there is no registry lookup and no update nag; updates are a manual rebase (README).
 let latest = null;
-try {
-  const lv = checkLatestVersion();
-  if (lv && lv.ok) latest = lv.version;
-} catch (e) {}
 
 const result = {
-  update_available: latest && isSemverNewer(latest, installed),
+  update_available: false,
   installed,
   latest: latest || 'unknown',
   checked: Math.floor(Date.now() / 1000),
