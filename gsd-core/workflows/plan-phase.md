@@ -10,6 +10,7 @@ Create executable phase prompts (PLAN.md files) for a roadmap phase with integra
 </purpose>
 
 <required_reading>
+@$HOME/.claude/get-shit-done/references/brd-spec-context.md
 Read all files referenced by the invoking prompt's execution_context before starting.
 
 @~/.claude/gsd-core/references/ui-brand.md
@@ -95,6 +96,57 @@ MVP_MODE_CFG=$(gsd_run query config-get workflow.mvp_mode --raw 2>/dev/null || e
 ```
 
 When the tdd capability's `workflow.tdd_mode` is active (resolved via the plan:pre render-hooks), the planner agent is instructed to apply `type: tdd` to eligible tasks using heuristics from `gsd-core/references/tdd.md`. The TDD guidance is injected via the tdd capability's contribution hook at §5.6; no inline config-get is needed.
+
+## 1.6. BRD + SPEC Documentation Gate
+
+Check whether business and technical requirements are documented before planning begins. This is a **warning gate** — never a hard block. It exists to prevent business rules and screen flows from being lost mid-process.
+
+```bash
+SPEC_FILE=$(ls ${phase_dir}/*-SPEC.md 2>/dev/null | grep -v AI-SPEC | head -1 || true)
+BRD_FILE=$(ls ${phase_dir}/*-BRD.md 2>/dev/null | head -1 || true)
+```
+
+**Skip this gate if:** `--force` flag is set OR `RESEARCH_ONLY` is true (research-only mode has no planning output).
+
+**Gate logic:**
+
+- Both exist → log `"📋 SPEC.md ✓  BRD.md ✓ — requirements documented, proceeding."` Continue.
+- Only SPEC exists (no BRD) → warn:
+  ```
+  ⚠️  BRD.md missing for phase ${phase_number}.
+  Business rules, personas, and screen flows are not documented.
+  Run /gsd-brd-phase ${phase_number} to capture them before planning.
+  ```
+  AskUserQuestion: "Continue planning without BRD? Business rules/screens may be lost mid-process."
+  Options: ["Continue anyway", "Stop — I'll run /gsd-brd-phase first"]
+  On "Stop": exit cleanly.
+- Only BRD exists (no SPEC) → warn:
+  ```
+  ⚠️  SPEC.md missing for phase ${phase_number}.
+  Technical requirements are not documented.
+  Run /gsd-spec-phase ${phase_number} to capture them before planning.
+  ```
+  AskUserQuestion: "Continue planning without SPEC?"
+  Options: ["Continue anyway", "Stop — I'll run /gsd-spec-phase first"]
+  On "Stop": exit cleanly.
+- Neither exists → warn:
+  ```
+  ⚠️  Neither SPEC.md nor BRD.md found for phase ${phase_number}.
+  Planning without requirements documentation risks losing business context and scope mid-process.
+  Recommended: run /gsd-brd-phase ${phase_number} then /gsd-spec-phase ${phase_number} first.
+  ```
+  AskUserQuestion: "Continue planning without any requirements documentation?"
+  Options: ["Continue anyway", "Stop — I'll document requirements first"]
+  On "Stop": exit cleanly.
+
+**BRD injection into planner context:**
+After this gate (regardless of outcome), collect all prior BRD files:
+```bash
+ALL_BRDS=$(find "${planning_path}/phases" -name "*-BRD.md" 2>/dev/null | sort)
+```
+Pass `ALL_BRDS` as additional `<files_to_read>` entries in the planner subagent prompt (step 7/8). This ensures the planner has full business context from all phases, not just the current one. If `ALL_BRDS` is empty, skip silently.
+
+**Response language:** If `response_language` is set, all warning messages and AskUserQuestion text above must be in `{response_language}`.
 
 When `CONTEXT_WINDOW >= 500000`, the planner prompt includes the 3 most recent prior-phase CONTEXT.md/SUMMARY.md files plus any phases in the current phase's `Depends on:` field (explicit deps load regardless of recency).
 
