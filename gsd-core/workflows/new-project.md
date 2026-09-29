@@ -638,6 +638,21 @@ gsd_run query config-new-project '{"mode":"[yolo|interactive]","granularity":"[s
 gsd_run query commit "chore: add project config" --files .planning/config.json
 ```
 
+## 5.05. Gate Zero — before the first line of code
+
+A new project applies **Gate Zero (A + G)** before any code is written, by any creation path.
+Do not restate the rule here — it is owned by `~/.claude/CLAUDE.md` §"Gate Zero", and a second
+prose copy is a second thing that rots. Read it there.
+
+Enforcement is a mechanism, not a reminder: `~/.claude/hooks/gate-zero-guard.sh` (PreToolUse on
+Bash + Write/Edit) fires on `git init` and again on the first source file of a repo born after
+its epoch. It is ADVISORY — it will not block, because arm 2 has no measured false-positive
+rate yet. If it did not fire for you, that is a defect worth reporting, not permission to skip.
+
+Why this section exists at all: measured 2026-08-28, `arch:new`, `arch:harden` and "Gate Zero"
+were cited by ZERO GSD workflows (control in the same command: "new-project" matched 41 files),
+so anyone creating a project through `/gsd:new-project` never met the gate.
+
 ## 5.1. Sub-Repo Detection
 
 **Detect multi-repo workspace:**
@@ -1117,6 +1132,48 @@ This ensures new projects get the default GSD workflow-enforcement guidance and 
 gsd_run query commit "docs: create roadmap ([N] phases)" --files .planning/ROADMAP.md .planning/STATE.md .planning/REQUIREMENTS.md "$INSTRUCTION_FILE"
 ```
 
+## 8.5. Generate Master BRD
+
+After roadmap is approved, generate a milestone-level BRD that captures the overarching business context. Per-phase BRDs inherit from this document and refine it — having a master BRD prevents business rules from being invented independently per phase and contradicting each other.
+
+**AskUserQuestion:**
+```
+{
+  question: "Generate a Master BRD for this project? Captures business rules, personas, and key screen flows at the milestone level — per-phase BRDs inherit from it.",
+  header: "Master BRD",
+  multiSelect: false,
+  options: [
+    { label: "Yes — generate now", description: "Claude drafts from roadmap + requirements. You review." },
+    { label: "Yes — I'll describe it", description: "I'll answer questions to build the BRD" },
+    { label: "Skip", description: "BRDs will be done per-phase only" }
+  ]
+}
+```
+
+**If "Skip":** Continue to step 9.
+
+**If "Yes — generate now":** Claude synthesizes master BRD from:
+- ROADMAP.md (all phases + goals)
+- REQUIREMENTS.md (all requirements)
+- Deep questioning answers collected in step 3
+- Research findings (if available)
+
+Produce: `.planning/MASTER-BRD.md` using the brd.md template with:
+- Phase scope set to "All phases / Milestone"
+- Business rules that span multiple phases
+- All personas with cross-phase journeys
+- Screen flows that appear in multiple phases (shared patterns)
+- No per-phase edge cases (those belong in per-phase BRDs)
+
+**If "Yes — I'll describe it":** Run abbreviated BRD interview (dimensions 1–3 only: business rules, personas, screen flows). Edge cases and conflicts are deferred to per-phase BRDs.
+
+**Commit:**
+```bash
+gsd_run query commit "docs: add Master BRD — business rules, personas, milestone screen flows" --files .planning/MASTER-BRD.md
+```
+
+**Per-phase BRD inheritance:** When `/gsd-brd-phase N` runs, it automatically reads `.planning/MASTER-BRD.md` (if present) and pre-populates dimensions from it. User reviews + refines for the specific phase scope.
+
 ## 9. Done
 
 Present completion summary:
@@ -1133,6 +1190,7 @@ Present completion summary:
 | Research       | `.planning/research/`       |
 | Requirements   | `.planning/REQUIREMENTS.md` |
 | Roadmap        | `.planning/ROADMAP.md`      |
+| Master BRD     | `.planning/MASTER-BRD.md` (if generated) |
 | Project guide  | `$INSTRUCTION_FILE`         |
 
 **[N] phases** | **[X] requirements** | Ready to build ✓
