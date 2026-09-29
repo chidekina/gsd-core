@@ -12,6 +12,7 @@ Use this workflow when:
 Instantly restore full project context so "Where were we?" has an immediate, complete answer.
 </purpose>
 
+@$HOME/.claude/get-shit-done/references/brd-spec-context.md
 <required_reading>
 @~/.claude/gsd-core/references/continuation-format.md
 </required_reading>
@@ -136,6 +137,323 @@ fi
 <step name="present_status">
 Present complete project status to user:
 
+**Memory context block (per D-01 through D-16)**
+
+Before rendering the status box, execute the following memory-loading sequence. All steps are non-blocking — any error emits the "none" line and continues.
+
+1. **Read project name (per D-14):**
+
+   ```bash
+   PROJECT_NAME=$(python3 -c "import json,sys; d=json.load(open('.planning/config.json')); print(d.get('project',{}).get('name',''))" 2>/dev/null || echo "")
+   ```
+
+   If `PROJECT_NAME` is empty (config.json missing, has no `project.name`, or python3 fails), skip the entire memory block silently and proceed to the status box.
+
+2. **Resolve memory file (per D-15):**
+
+   ```bash
+   MEMDIR="$HOME/.claude/projects/-home-hidekina-projetos/memory"
+   MEMFILE=""
+   if [ -f "$MEMDIR/project_${PROJECT_NAME}.md" ]; then
+     MEMFILE="$MEMDIR/project_${PROJECT_NAME}.md"
+     MEMFILENAME="project_${PROJECT_NAME}.md"
+   elif [ -f "$MEMDIR/${PROJECT_NAME}.md" ]; then
+     MEMFILE="$MEMDIR/${PROJECT_NAME}.md"
+     MEMFILENAME="${PROJECT_NAME}.md"
+   fi
+   ```
+
+3. **Calculate age (per D-07):**
+
+   If `MEMFILE` is set, extract `last_updated` from frontmatter:
+
+   ```bash
+   LAST_UPDATED=$(python3 -c "import re,sys; lines=open('$MEMFILE').readlines()[:10]; m=[re.search(r'last_updated:\s*(\S+)',l) for l in lines]; print(next((x.group(1) for x in m if x),''))" 2>/dev/null || echo "")
+   ```
+
+   If `LAST_UPDATED` is a valid YYYY-MM-DD date, compute age in days:
+
+   ```bash
+   AGE_DAYS=$(python3 -c "from datetime import date; print((date.today()-date.fromisoformat('$LAST_UPDATED')).days)" 2>/dev/null || echo "")
+   ```
+
+   If `LAST_UPDATED` is empty or parse fails, fall back to mtime:
+
+   ```bash
+   AGE_DAYS=$(python3 -c "import os,datetime; s=os.stat('$MEMFILE'); print((datetime.date.today()-datetime.date.fromtimestamp(s.st_mtime)).days)" 2>/dev/null || echo "0")
+   ```
+
+4. **Emit memory line (per D-02, D-05, D-06, D-13):**
+
+   Based on findings, display exactly one of the following lines:
+
+   - No memory file found:
+     ```
+     📚 Memory: none — run /gsd-pause-work to create project_<name>.md
+     ```
+
+   - File found, `AGE_DAYS` < 14 (fresh):
+     ```
+     📚 Memory: <MEMFILENAME> (<AGE_DAYS>d ago)
+     ```
+
+   - File found, 14 ≤ `AGE_DAYS` < 30 (stale — warning):
+     ```
+     ⚠️ Memory: <MEMFILENAME> (<AGE_DAYS>d ago — consider running /gsd-pause-work to refresh)
+     ```
+
+   - File found, `AGE_DAYS` ≥ 30 (very stale — alert):
+     ```
+     🔴 Memory: <MEMFILENAME> (<AGE_DAYS>d ago — very stale, run /gsd-pause-work)
+     ```
+
+   All I/O errors and python3 failures must be caught; on any exception emit the "none" line and continue. The memory block NEVER aborts the resume flow.
+
+<!-- staleness-refresh-start -->
+4.1–4.5. **Staleness auto-refresh (per REFRESH-01, REFRESH-02):**
+
+4.1. If `MEMFILE` is empty (no memory file found), skip this block silently and proceed to step 5.
+
+4.2. If `AGE_DAYS` < 14, skip this block silently and proceed to step 5.
+
+4.3. When `AGE_DAYS` >= 14: call `AskUserQuestion` with:
+- question: `"Memory file {MEMFILENAME} is {AGE_DAYS} days old. Refresh it now with current git status, open PRs, and STATE.md data?"`
+- options: `["yes", "no"]`
+
+Capture the answer.
+
+4.4. If answer is "no": emit `↷ Skipping refresh — continuing with stale memory` and proceed to step 5.
+
+4.5. If answer is "yes": execute the full refresh sequence below. On any failure in any sub-step, catch the error, emit `⚠️ Refresh failed: <brief reason>`, and proceed to step 5. Never abort the resume flow.
+
+**Refresh sequence (answer == "yes"):**
+
+**R-1. Branch:**
+```bash
+BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null)
+[ -z "$BRANCH" ] && BRANCH="unknown"
+```
+
+**R-2. Open PRs:**
+```bash
+REMOTE_URL=$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null || echo "")
+PR_LINES="none"
+if echo "$REMOTE_URL" | grep -qi "github.com"; then
+  REPO_SLUG=$(echo "$REMOTE_URL" | sed 's|git@github.com:||; s|https://github.com/||; s|\.git$||')
+  PR_JSON=$(gh pr list --json number,title,state --repo "$REPO_SLUG" --limit 10 2>/dev/null || echo "[]")
+  PR_LINES=$(python3 -c "
+import sys, json
+data = json.loads(sys.argv[1])
+lines = [f'- #{p[\"number\"]} — {p[\"title\"]} ({p[\"state\"]})' for p in data]
+print('\n'.join(lines) if lines else 'none')
+" "$PR_JSON" 2>/dev/null || echo "none")
+fi
+```
+
+**R-3. Stack:**
+```bash
+STACK="unknown"
+if [ -f "$PROJECT_ROOT/package.json" ]; then
+  STACK=$(python3 - "$PROJECT_ROOT/package.json" <<'PYEOF'
+import sys, json, pathlib
+try:
+    pkg = json.loads(pathlib.Path(sys.argv[1]).read_text())
+    skip = {'@types/', 'eslint', 'prettier', 'typescript', 'vitest', 'jest', 'ts-node'}
+    deps = list({**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}.keys())
+    filtered = [d for d in deps if not any(s in d for s in skip)][:10]
+    print(', '.join(filtered) if filtered else 'unknown')
+except Exception:
+    print('unknown')
+PYEOF
+)
+elif [ -f "$PROJECT_ROOT/pyproject.toml" ]; then
+  STACK=$(grep -E '^\s*(fastapi|django|flask|sqlalchemy|pydantic)' "$PROJECT_ROOT/pyproject.toml" 2>/dev/null | head -8 | tr '\n' ', ' || echo "unknown")
+elif [ -f "$PROJECT_ROOT/Cargo.toml" ]; then
+  STACK=$(grep -A 50 '\[dependencies\]' "$PROJECT_ROOT/Cargo.toml" 2>/dev/null | grep -E '^[a-z]' | cut -d' ' -f1 | head -8 | tr '\n' ', ' || echo "unknown")
+elif [ -f "$PROJECT_ROOT/go.mod" ]; then
+  STACK=$(grep '^module\|require' "$PROJECT_ROOT/go.mod" 2>/dev/null | head -5 | tr '\n' ' ' || echo "unknown")
+fi
+[ -z "$STACK" ] && STACK="unknown"
+```
+
+**R-4. Blocked tasks:**
+```bash
+BLOCKED_LINES=$(python3 - "$PROJECT_ROOT" <<'PYEOF'
+import sys, re, pathlib
+project_root = sys.argv[1]
+state_path = pathlib.Path(project_root) / ".planning" / "STATE.md"
+try:
+    state = state_path.read_text()
+    m = re.search(r'^## Blockers\s*\n(.*?)(?=^## |\Z)', state, re.MULTILINE | re.DOTALL)
+    if m:
+        lines = [l.strip() for l in m.group(1).splitlines() if l.strip() and l.strip() not in ('Nenhum.', 'None.', '—', '-')]
+        print('\n'.join(f'- {l.lstrip("- ")}' for l in lines) if lines else 'none')
+    else:
+        print('none')
+except Exception:
+    print('none')
+PYEOF
+)
+[ -z "$BLOCKED_LINES" ] && BLOCKED_LINES="none"
+```
+
+**R-5. Last 3 decisions:**
+```bash
+DECISION_LINES=$(python3 - "$PROJECT_ROOT" <<'PYEOF'
+import sys, re, pathlib
+project_root = sys.argv[1]
+state_path = pathlib.Path(project_root) / ".planning" / "STATE.md"
+PLACEHOLDERS = {'(none yet — roadmap just created)', '(none)', '(none yet)'}
+try:
+    state = state_path.read_text()
+    m = re.search(r'^## Key Decisions\s*\n(.*?)(?=^## |\Z)', state, re.MULTILINE | re.DOTALL)
+    if m:
+        lines = [l.strip() for l in m.group(1).splitlines() if l.strip().startswith('- ') and l.strip() not in PLACEHOLDERS]
+        last3 = lines[-3:]
+        print('\n'.join(last3) if last3 else 'none')
+    else:
+        print('none')
+except Exception:
+    print('none')
+PYEOF
+)
+[ -z "$DECISION_LINES" ] && DECISION_LINES="none"
+```
+
+**R-6. Write rich context to memory file:**
+
+Get timestamp:
+```bash
+TIMESTAMP=$(python3 -c "from datetime import datetime; print(datetime.now().strftime('%Y-%m-%d %H:%M'))")
+```
+
+Build section and write idempotently:
+```bash
+NEW_SECTION="<!-- rich-start -->
+## Rich Context [$TIMESTAMP]
+
+**Branch:** $BRANCH
+**Stack:** $STACK
+**Open PRs:**
+$PR_LINES
+
+**Blocked Tasks:**
+$BLOCKED_LINES
+
+**Last 3 Decisions:**
+$DECISION_LINES
+<!-- rich-end -->"
+
+python3 - "$MEMFILE" "$NEW_SECTION" <<'PYEOF'
+import sys, re, pathlib
+mem_file = sys.argv[1]
+new_section = sys.argv[2]
+try:
+    content = pathlib.Path(mem_file).read_text()
+    if re.search(r'<!-- rich-start -->', content):
+        updated = re.sub(r'<!-- rich-start -->.*?<!-- rich-end -->', new_section, content, flags=re.DOTALL)
+    else:
+        updated = content.rstrip() + '\n\n' + new_section + '\n'
+    pathlib.Path(mem_file).write_text(updated)
+    print(f'✓ Rich context updated: {pathlib.Path(mem_file).name}')
+except Exception as e:
+    print(f'⚠️ Rich enrichment failed: {e}')
+PYEOF
+```
+
+**R-7. Bump last_updated in frontmatter:**
+```bash
+python3 - "$MEMFILE" <<'PYEOF'
+import sys, re, pathlib
+from datetime import date
+mem_file = sys.argv[1]
+today = date.today().isoformat()
+try:
+    content = pathlib.Path(mem_file).read_text()
+    # Find frontmatter block (between first and second ---)
+    fm_match = re.match(r'^(---\n)(.*?)(---\n)', content, re.DOTALL)
+    if fm_match:
+        fm = fm_match.group(2)
+        if 'last_updated:' in fm:
+            fm_new = re.sub(r'last_updated:.*', f'last_updated: {today}', fm)
+        else:
+            fm_new = fm.rstrip('\n') + f'\nlast_updated: {today}\n'
+        content_new = fm_match.group(1) + fm_new + fm_match.group(3) + content[fm_match.end():]
+        pathlib.Path(mem_file).write_text(content_new)
+except Exception as e:
+    print(f'⚠️ last_updated bump failed: {e}')
+PYEOF
+```
+
+On successful completion emit: `✓ Memory refreshed: {MEMFILENAME}` then proceed to step 5.
+
+On any failure in R-1 through R-7: emit `⚠️ Refresh failed: <brief reason>` and proceed to step 5.
+
+This entire block is non-blocking — any exception must be caught and the resume flow must continue.
+<!-- staleness-refresh-end -->
+
+5. **Lessons surface block (per D-03, D-04, D-09 through D-12):**
+
+   Prerequisites: `PROJECT_NAME` is already known from step 1. If `PROJECT_NAME` is empty, skip this block silently.
+
+   ```bash
+   LESSONS_FILE="$HOME/.claude/projects/-home-hidekina-projetos/memory/lessons.md"
+   LESSONS_LINE=""
+   if [ -f "$LESSONS_FILE" ]; then
+     LESSONS_LINE=$(python3 -c "
+import sys, re
+
+PROJECT_NAME = '''$PROJECT_NAME'''.lower().strip()
+if not PROJECT_NAME:
+    print('SKIP')
+    sys.exit(0)
+
+try:
+    content = open('$LESSONS_FILE').read()
+except Exception:
+    print('NONE')
+    sys.exit(0)
+
+entries = content.split('\n---\n')
+matches = []
+
+for entry in entries:
+    tags_m = re.search(r'\*\*Tags:\*\*\s*(.+)', entry)
+    rule_m = re.search(r'\*\*Rule:\*\*\s*(.+)', entry)
+    count_m = re.search(r'\*\*Repeat-count:\*\*\s*(\d+)', entry)
+    if not (tags_m and rule_m and count_m):
+        continue
+    tags = tags_m.group(1).lower()
+    if PROJECT_NAME not in tags:
+        continue
+    rule = rule_m.group(1).strip()
+    count = int(count_m.group(1))
+    if len(rule) > 60:
+        rule = rule[:57] + '...'
+    matches.append((count, rule))
+
+matches.sort(key=lambda x: x[0], reverse=True)
+top3 = matches[:3]
+
+if not top3:
+    print('NONE')
+else:
+    print(' / '.join(f'{r} ({c}×)' for c, r in top3))
+" 2>/dev/null || echo "NONE")
+   else
+     LESSONS_LINE="NONE"
+   fi
+
+   if [ "$LESSONS_LINE" = "NONE" ] || [ -z "$LESSONS_LINE" ] || [ "$LESSONS_LINE" = "SKIP" ]; then
+     echo "💱 Lessons: none tagged for this project"
+   else
+     echo "💱 Lessons: $LESSONS_LINE"
+   fi
+   ```
+
+   This line appears immediately after the memory line and before the `╔══╗` box.
+   The block never aborts resume flow — any failure emits the `none tagged` line and continues.
+
 ```
 ### PROJECT STATUS
 
@@ -160,6 +478,9 @@ Last activity: [date] - [what happened]
 [If pending todos exist:]
 📋 [N] pending todos — /gsd:capture --list to review
 
+[If pending lessons exist (count=$(grep -c "<!-- hash:" ~/.aria/pending-lessons.md 2>/dev/null || echo 0); count > 0):]
+📖 [N] lessons pendentes — /lesson para revisar
+
 [If blockers exist:]
 ⚠️  Carried concerns:
     - [blocker 1]
@@ -167,6 +488,19 @@ Last activity: [date] - [what happened]
 
 [If alignment is not ✓:]
 ⚠️  Brief alignment: [status] - [assessment]
+
+[BRD + SPEC coverage for active phase — always show:]
+```bash
+PHASE_BRD=$(ls "${phase_dir}"/*-BRD.md 2>/dev/null | head -1 || true)
+PHASE_SPEC=$(ls "${phase_dir}"/*-SPEC.md 2>/dev/null | grep -v AI-SPEC | head -1 || true)
+```
+Display per the brd-spec-context.md compact format:
+  📋 Phase {N} requirements context:
+    BRD:  {N rules / "missing — run /gsd-brd-phase {N}"}
+    SPEC: {N requirements / "missing — run /gsd-spec-phase {N}"}
+
+If BRD exists but is older than 7 days and phase is In Progress:
+  ⚠️  BRD is {X} days old — verify it still reflects current scope.
 ```
 
 </step>
