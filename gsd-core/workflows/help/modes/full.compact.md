@@ -26,7 +26,7 @@ Usage: `/gsd:next`
 ## Staying Updated
 
 ```bash
-npx @opengsd/gsd-core@latest
+# fork install: see the fork README (https://github.com/chidekina/gsd-core, branch local); /gsd-update is disabled
 ```
 
 ## Core Workflow

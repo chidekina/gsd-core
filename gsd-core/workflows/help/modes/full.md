@@ -34,7 +34,7 @@ Usage: `/gsd:next`
 GSD evolves fast. Update periodically:
 
 ```bash
-npx @opengsd/gsd-core@latest
+# fork install: see the fork README (https://github.com/chidekina/gsd-core, branch local); /gsd-update is disabled
 ```
 
 ## Core Workflow
@@ -620,7 +620,7 @@ Update GSD to latest version with changelog preview.
 - Displays changelog entries for versions you've missed
 - Highlights breaking changes
 - Confirms before running install
-- Better than raw `npx @opengsd/gsd-core`
+- Disabled on this fork: it refuses and points at the fork README
 
 Usage: `/gsd:update`
 
