@@ -12,7 +12,7 @@ Use this workflow when:
 Instantly restore full project context so "Where were we?" has an immediate, complete answer.
 </purpose>
 
-@$HOME/.claude/get-shit-done/references/brd-spec-context.md
+@~/.claude/gsd-core/references/brd-spec-context.md
 <required_reading>
 @~/.claude/gsd-core/references/continuation-format.md
 </required_reading>
