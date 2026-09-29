@@ -8,7 +8,7 @@ Retroactive 6-pillar visual audit of implemented frontend code. Standalone comma
 
 <available_agent_types>
 Valid GSD subagent types (use exact names — do not fall back to 'general-purpose'):
-- gsd-ui-auditor — Audits UI against design requirements
+- ui-quality — UI quality agent; spawn with mode=audit here to audit implemented UI (scored UI-REVIEW.md)
 </available_agent_types>
 
 <process>
@@ -21,7 +21,7 @@ RESPONSE_LANGUAGE=$(gsd_run query config-get response_language --raw --default "
 PHASE_ARG=$(echo "$ARGUMENTS" | sed -E 's/--ws[[:space:]]+[A-Za-z0-9._-]+//g' | xargs)
 INIT=$(gsd_run query init.phase-op "${PHASE_ARG}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
-AGENT_SKILLS_UI_REVIEWER=$(gsd_run query agent-skills gsd-ui-auditor)
+AGENT_SKILLS_UI_REVIEWER=$(gsd_run query agent-skills ui-quality)
 # workflow.ui_interaction_capture (default false): read here and handed to the auditor
 # through its <config> block — the agent carries no gsd_run resolver of its own.
 INTERACTION_CAPTURE=$(gsd_run query config-get workflow.ui_interaction_capture --raw 2>/dev/null || echo "false")
@@ -33,7 +33,7 @@ INTERACTION_CAPTURE=$(gsd_run query config-get workflow.ui_interaction_capture -
 Parse: `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `padded_phase`, `commit_docs`.
 
 ```bash
-UI_AUDITOR_MODEL=$(gsd_run query resolve-model gsd-ui-auditor --raw)
+UI_AUDITOR_MODEL=$(gsd_run query resolve-model ui-quality --raw)
 ```
 
 Display banner:
@@ -76,7 +76,7 @@ Build file list for auditor:
 - UI-SPEC.md (if exists — audit baseline)
 - CONTEXT.md (if exists — locked decisions)
 
-## 3. Spawn gsd-ui-auditor
+## 3. Spawn ui-quality (mode=audit)
 
 ```
 ◆ Spawning UI auditor... (runs in a subagent — no output until it returns, ~1–5 min; expected, not a freeze)
@@ -85,10 +85,12 @@ Build file list for auditor:
 Build prompt:
 
 ```markdown
-Read ~/.claude/agents/gsd-ui-auditor.md for instructions.
+Read ~/.claude/agents/ui-quality.md for instructions.
+
+mode: audit
 
 <objective>
-Conduct 6-pillar visual audit of Phase {phase_number}: {phase_name}
+Operate in mode=audit. Conduct 6-pillar visual audit of Phase {phase_number}: {phase_name}
 {If UI-SPEC exists: "Audit against UI-SPEC.md design contract."}
 {If no UI-SPEC: "Audit against abstract 6-pillar standards."}
 </objective>
@@ -124,9 +126,9 @@ falls back to its Playwright-only static capture when it is `false` or no Chrome
 ```
 Agent(
   prompt=ui_audit_prompt,
-  subagent_type="gsd-ui-auditor",
+  subagent_type="ui-quality",
   model="{UI_AUDITOR_MODEL}",
-  description="UI Audit Phase {N}"
+  description="UI Audit Phase {N} (mode=audit)"
 )
 ```
 
@@ -202,7 +204,7 @@ gsd_run query commit "docs(${padded_phase}): UI audit review" --files "${PHASE_D
 - [ ] Phase validated
 - [ ] SUMMARY.md files found (execution completed)
 - [ ] Existing review handled (re-audit/view)
-- [ ] gsd-ui-auditor spawned with correct context
+- [ ] ui-quality (mode=audit) spawned with correct context
 - [ ] UI-REVIEW.md created in phase directory
 - [ ] Score summary displayed to user
 - [ ] Next steps presented
