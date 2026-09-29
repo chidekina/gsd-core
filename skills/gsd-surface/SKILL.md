@@ -161,7 +161,7 @@ All paths can be overridden by reading the `CLAUDE_CONFIG_DIR` env var if set.
 
 - Unknown cluster name → list valid cluster names, exit without writing.
 - Unknown profile name → list known profiles (`core`, `standard`, `full`), exit.
-- Missing `surface.cjs` → prompt: "Run `npm i -g @opengsd/gsd-core` to reinstall GSD."
+- Missing `surface.cjs` → prompt: "Reinstall GSD from the fork tarball (fork README, https://github.com/chidekina/gsd-core, branch local); never run an upstream npm install."
 
 <execution_context>
 Surface state file: `~/.claude/.gsd-surface.json`
