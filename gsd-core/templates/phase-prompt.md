@@ -67,7 +67,7 @@ Output: [What artifacts will be created]
 
 <tasks>
 
-<task type="auto">
+<task type="auto" parallel="true">   <!-- optional: mark tasks that share no files and can run concurrently -->
   <name>Task 1: [Action-oriented name]</name>
   <files>path/to/file.ext, another/file.ext</files>
   <read_first>path/to/reference.ext, path/to/source-of-truth.ext</read_first>
@@ -148,6 +148,7 @@ After completion, create `.planning/phases/XX-name/{phase}-{plan}-SUMMARY.md`
 | `requirements` | Yes | **MUST** list requirement IDs from ROADMAP. Every roadmap requirement MUST appear in at least one plan. |
 | `user_setup` | No | Array of human-required setup items (external services) |
 | `must_haves` | Yes | Goal-backward verification criteria (see below) |
+| `parallel` (task attr) | No | `"true"` — marks task as safe to run concurrently with other `parallel="true"` tasks in same plan |
 
 **Wave is pre-computed:** Wave numbers are assigned during `/gsd:plan-phase`. Execute-phase reads `wave` directly from frontmatter and groups plans by wave number. No runtime dependency analysis needed.
 
