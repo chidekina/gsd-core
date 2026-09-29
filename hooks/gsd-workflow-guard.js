@@ -24,6 +24,22 @@ const { tokenize, skipToSubcommand } = require('./lib/git-cmd.js');
 const { HOOK_ON_CRASH, allow, deny, crash } = require('./lib/hook-exit.js');
 const { reportIfUndetermined } = require('./lib/git-probe.js');
 
+// [gsd-local] AUTO-01/AUTO-02: resolve the GSD project root by walking up from the start dir
+// (max 4 levels) instead of trusting cwd, so the guard also works from a subdirectory.
+function findGsdProjectRoot(startDir) {
+  let search = path.resolve(startDir);
+  for (let depth = 0; depth <= 4; depth++) {
+    const configPath = path.join(search, '.planning', 'config.json');
+    if (fs.existsSync(configPath)) {
+      return { root: search, configPath };
+    }
+    const parent = path.dirname(search);
+    if (parent === search) break; // filesystem root reached
+    search = parent;
+  }
+  return null;
+}
+
 // This guard is almost entirely advisory (fail open — a broken advisory must
 // never wedge every tool call), with ONE hard block (#3504 force-add-on-
 // agent-branch) that fails CLOSED on internal error instead. That split is
@@ -174,10 +190,10 @@ function failClosedBlockContext(rawInput) {
 }
 
 function workflowGuardEnabled(cwd) {
-  const configPath = path.join(cwd, '.planning', 'config.json');
-  if (!fs.existsSync(configPath)) return false;
+  const gsdProject = findGsdProjectRoot(cwd);
+  if (!gsdProject) return false; // AUTO-02: not a GSD project — no guard, no crash
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const config = JSON.parse(fs.readFileSync(gsdProject.configPath, 'utf8'));
     return Boolean(config.hooks?.workflow_guard);
   } catch (e) {
     return false;
