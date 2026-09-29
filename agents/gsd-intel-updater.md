@@ -1,5 +1,6 @@
 ---
 name: gsd-intel-updater
+model: haiku
 description: Analyzes codebase and writes structured intel files to .planning/intel/.
 tools: Read, Write, Bash, Glob, Grep
 color: cyan
