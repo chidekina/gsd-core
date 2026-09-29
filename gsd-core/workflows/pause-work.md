@@ -235,6 +235,218 @@ gsd_run query commit "wip: [context-name] paused at [X]/[Y]" --files [handoff-pa
 
 <step name="confirm">
 ```
+[If pending lessons > 0 (count=$(grep -c "<!-- hash:" ~/.aria/pending-lessons.md 2>/dev/null || echo 0)):]
+⚠️ N lessons pendentes — /lesson antes de pausar?
+
+<!-- cwd-resolution-start -->
+Resolve project root: run the following bash commands and capture PROJECT_ROOT.
+
+```bash
+. "$HOME/.claude/hooks/gsd-find-project-root.sh"
+find_gsd_project_root "${CLAUDE_CWD:-$(pwd)}"
+```
+
+After running: if PROJECT_ROOT is empty, print `⚠️ pause-work: project root not found — memory mapper and VPS sync skipped` and skip all blocks through vps-sync-end.
+
+Store PROJECT_ROOT as the absolute path to use in all subsequent .planning/ reads.
+<!-- cwd-resolution-end -->
+
+<!-- memory-mapper-start -->
+Detect project name: run `python3 -c "import json,pathlib,sys; d=json.loads(pathlib.Path(sys.argv[1]).read_text()); print(d['project']['name'])" "$PROJECT_ROOT/.planning/config.json"`. If `.planning/config.json` does not exist or the `project.name` key is missing, set name to empty string and skip the entire mapper block silently (non-blocking).
+
+If name is non-empty, resolve memory file: check whether `~/.claude/projects/-home-hidekina-projetos/memory/project_<name>.md` exists. If yes, set `_gsd_memory_file` to that path. If not, check `~/.claude/projects/-home-hidekina-projetos/memory/<name>.md`. If that exists, set `_gsd_memory_file` to that path. If neither exists, create `~/.claude/projects/-home-hidekina-projetos/memory/project_<name>.md` with the following content and set `_gsd_memory_file` to that path:
+
+```
+---
+name: <name>
+description: "<name> project context"
+type: project
+last_updated: <today YYYY-MM-DD>
+---
+
+# <name>
+
+*Memory file created automatically by pause-work on <today YYYY-MM-DD>.*
+```
+
+After resolving or creating the file, check `~/.claude/projects/-home-hidekina-projetos/memory/MEMORY.md` for an existing entry matching `project_<name>` or `(<name>)`. If no match found, append the following line to MEMORY.md:
+
+`- [project_<name>](memory/project_<name>.md) — <name> project context`
+
+Do not add a duplicate if any matching entry already exists. Store the resolved path as `_gsd_memory_file` for use by subsequent steps (progress sync and VPS sync below).
+
+Any exception in the above logic must print `⚠️ Memory mapper failed: <brief reason>` and continue — this block is non-blocking.
+<!-- memory-mapper-end -->
+
+<!-- progress-sync-start -->
+If `_gsd_memory_file` is empty or unset (mapper was skipped), skip this entire block silently.
+
+Otherwise, open `.planning/STATE.md`. If the file does not exist, print `⚠️ Progress sync skipped — STATE.md not found` and skip to end of block.
+
+Extract the following fields from STATE.md:
+- `phase`: the phase identifier from the `## Current Focus` or `## Current Position` section (e.g. `03-hook-pause-work-memory-sync`)
+- `plan`: current plan number from the same section
+- `progress`: percentage or fraction from the `progress:` frontmatter field or `## Progress` section (e.g. `2/5 phases (40%)`)
+- `next`: first meaningful line from `## Next Action`, `## What's Next`, or the `## Current Focus` next-step line (fallback: `"See STATE.md"`)
+
+Get timestamp: `python3 -c "from datetime import datetime; print(datetime.now().strftime('%Y-%m-%d %H:%M'))"`.
+
+Append the following block to the end of `_gsd_memory_file`:
+
+```
+(blank line)
+## Session Sync [TIMESTAMP]
+- Phase: PHASE
+- Plan: PLAN
+- Progress: PROGRESS
+- Next: NEXT
+```
+
+Then bump `last_updated` in the memory file frontmatter: read the file, replace the `last_updated:` value between the leading `---` delimiters with today's date (`python3 -c "from datetime import date; print(date.today())"`) using a python3 inline substitution. If `last_updated` is absent from frontmatter, insert `last_updated: YYYY-MM-DD` as the last line before the closing `---`. Write the file back.
+
+Emit `✓ Memory synced: <basename of _gsd_memory_file>` (e.g. `✓ Memory synced: project_claude-harness.md`).
+
+Any file I/O failure must print `⚠️ Memory sync failed: <brief reason>` and continue — this block is non-blocking.
+<!-- progress-sync-end -->
+
+<!-- rich-enrichment-start -->
+If `_gsd_memory_file` is empty or unset (mapper was skipped), skip this entire block silently.
+
+Collect the following fields in sequence — each sub-step is non-blocking (failures fall back to "none"):
+
+**1. Branch (RICH-01):**
+Run `git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null`. If output is empty, use "unknown".
+
+**2. Open PRs (RICH-01):**
+Get `REMOTE_URL` via `git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null`. If empty, set PR_LINES to "none". Otherwise check if REMOTE_URL contains "github.com" (case-insensitive) — if not, set PR_LINES to "none". If yes:
+- Extract REPO_SLUG: `echo "$REMOTE_URL" | sed 's|git@github.com:||; s|https://github.com/||; s|\.git$||'`
+- Run `gh pr list --json number,title,state --repo "$REPO_SLUG" --limit 10 2>/dev/null || echo "[]"`
+- Use python3 to parse JSON and format as markdown lines: `- #N — title (state)`. If list is empty, use "none".
+
+**3. Stack (RICH-01):**
+Check for manifests in PROJECT_ROOT in this order: `package.json` → `pyproject.toml` → `Cargo.toml` → `go.mod`.
+- `package.json`: use python3 to read `dependencies` + `devDependencies`, filter out `@types/` prefixes and pure tooling packages (eslint, prettier, typescript, vitest, jest, ts-node), return top 10 as comma-separated string.
+- `pyproject.toml`: `grep -E '^\s*(fastapi|django|flask|sqlalchemy|pydantic)' "$PROJECT_ROOT/pyproject.toml" | head -8 | tr '\n' ', '`
+- `Cargo.toml`: `grep -A 50 '\[dependencies\]' "$PROJECT_ROOT/Cargo.toml" | grep -E '^[a-z]' | cut -d' ' -f1 | head -8 | tr '\n' ', '`
+- `go.mod`: `grep '^module\|require' "$PROJECT_ROOT/go.mod" | head -5 | tr '\n' ' '`
+If no manifest found or extraction returns empty, use "unknown".
+
+**4. Blocked tasks (RICH-02):**
+Use python3 with `sys.argv` to read `STATE.md`:
+```
+python3 - "$PROJECT_ROOT" <<'PYEOF'
+import sys, re, pathlib
+project_root = sys.argv[1]
+state_path = pathlib.Path(project_root) / ".planning" / "STATE.md"
+try:
+    state = state_path.read_text()
+    m = re.search(r'^## Blockers\s*\n(.*?)(?=^## |\Z)', state, re.MULTILINE | re.DOTALL)
+    if m:
+        lines = [l.strip() for l in m.group(1).splitlines() if l.strip() and l.strip() not in ('Nenhum.', 'None.', '—', '-')]
+        print('\n'.join(f'- {l.lstrip("- ")}' for l in lines) if lines else 'none')
+    else:
+        print('none')
+except Exception as e:
+    print('none')
+PYEOF
+```
+If output is empty or "none", BLOCKED_LINES = "none".
+
+**5. Last 3 decisions (RICH-02):**
+Use python3 with `sys.argv` to read `STATE.md`:
+```
+python3 - "$PROJECT_ROOT" <<'PYEOF'
+import sys, re, pathlib
+project_root = sys.argv[1]
+state_path = pathlib.Path(project_root) / ".planning" / "STATE.md"
+PLACEHOLDERS = {'(none yet — roadmap just created)', '(none)', '(none yet)'}
+try:
+    state = state_path.read_text()
+    m = re.search(r'^## Key Decisions\s*\n(.*?)(?=^## |\Z)', state, re.MULTILINE | re.DOTALL)
+    if m:
+        lines = [l.strip() for l in m.group(1).splitlines() if l.strip().startswith('- ') and l.strip() not in PLACEHOLDERS]
+        last3 = lines[-3:]
+        print('\n'.join(last3) if last3 else 'none')
+    else:
+        print('none')
+except Exception as e:
+    print('none')
+PYEOF
+```
+If output is empty or "none", DECISION_LINES = "none".
+
+**Write Rich Context to memory file:**
+
+Get timestamp: `python3 -c "from datetime import datetime; print(datetime.now().strftime('%Y-%m-%d %H:%M'))"`.
+
+Build the new section:
+```
+<!-- rich-start -->
+## Rich Context [TIMESTAMP]
+
+**Branch:** BRANCH
+**Stack:** STACK
+**Open PRs:**
+PR_LINES
+
+**Blocked Tasks:**
+BLOCKED_LINES
+
+**Last 3 Decisions:**
+DECISION_LINES
+<!-- rich-end -->
+```
+
+Use python3 with `sys.argv` to write idempotently to the memory file:
+```
+python3 - "$_gsd_memory_file" "$NEW_SECTION" <<'PYEOF'
+import sys, re, pathlib
+mem_file = sys.argv[1]
+new_section = sys.argv[2]
+try:
+    content = pathlib.Path(mem_file).read_text()
+    if re.search(r'<!-- rich-start -->', content):
+        updated = re.sub(r'<!-- rich-start -->.*?<!-- rich-end -->', new_section, content, flags=re.DOTALL)
+    else:
+        updated = content.rstrip() + '\n\n' + new_section + '\n'
+    pathlib.Path(mem_file).write_text(updated)
+    print(f'✓ Rich context updated: {pathlib.Path(mem_file).name}')
+except Exception as e:
+    print(f'⚠️ Rich enrichment failed: {e}')
+PYEOF
+```
+
+Emit the output of the python3 command above (either `✓ Rich context updated: <basename>` or `⚠️ Rich enrichment failed: <reason>`).
+
+Any failure in any sub-step must be caught (try/except in python3, `|| echo "none"` in bash) — the entire block is non-blocking and must not interrupt pause-work execution.
+<!-- rich-enrichment-end -->
+
+<!-- vps-sync-start -->
+Detect VPS config using two checks:
+- Check A: `python3 -c "import json,pathlib,sys; d=json.loads(pathlib.Path(sys.argv[1]).read_text()); print('yes' if 'vps' in d else 'no')" "$PROJECT_ROOT/.planning/config.json"` — prints `yes` if top-level `vps` key exists.
+- Check B: `grep -rl "VPS\|vps:" .planning/phases/ 2>/dev/null` — returns matching files if VPS appears in any CONTEXT.md.
+
+If neither check finds VPS config, skip the entire block silently (non-VPS project).
+
+If VPS config is detected, extract SSH connection details from `.planning/config.json` `vps` object: `host`, `port` (default `22` if absent), `user` (default `root` if absent). If config.json has no `vps` key but the grep check matched, print `⚠️ VPS config detected in CONTEXT.md but no ssh details in config.json — snapshot skipped` and skip.
+
+Run SSH snapshot with timeout: `ssh -o ConnectTimeout=5 -o BatchMode=yes -p PORT USER@HOST "docker ps --format '{{.Names}}\t{{.Status}}'" 2>&1`. If the command exits non-zero or the output contains `Connection refused`, `Connection timed out`, or `Permission denied`, print `⚠️ VPS snapshot skipped — SSH unreachable (HOST:PORT)` and skip.
+
+On success, get timestamp via `python3 -c "from datetime import datetime; print(datetime.now().strftime('%Y-%m-%d %H:%M'))"` and append the following to `~/.claude/projects/-home-hidekina-projetos/memory/vps-apps-status.md`:
+
+```
+(blank line)
+## VPS Snapshot [TIMESTAMP] — PROJECT_NAME
+RAW_DOCKER_PS_OUTPUT
+```
+
+Where PROJECT_NAME = `project.name` from config.json (or empty if unavailable).
+
+Emit `✓ VPS snapshot saved: vps-apps-status.md` on success.
+
+Any exception must print `⚠️ VPS sync failed: <brief reason>` and continue — this block is non-blocking.
+<!-- vps-sync-end -->
+
 ✓ Handoff created:
   - .planning/HANDOFF.json (structured, machine-readable)
   - [handoff-path] (human-readable)
