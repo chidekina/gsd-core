@@ -1,6 +1,7 @@
 ---
 name: gsd-settings
-description: "Configure GSD workflow toggles and model profile"
+description: "Alias of gsd-config — configure GSD workflow toggles, advanced knobs, integrations, model profile (merged SKILL-OVERLAP-06)"
+argument-hint: "[--advanced | --integrations | --profile <name>]"
 allowed-tools:
   - Read
   - Write
@@ -11,20 +12,46 @@ allowed-tools:
 
 
 <objective>
-Interactive configuration of GSD workflow agents and model profile via multi-question prompt.
+Configure GSD settings interactively with a single consolidated command.
 
-Routes to the settings workflow which handles:
-- Config existence ensuring
-- Current settings reading and parsing
-- Interactive multi-question prompt covering model profile and workflow toggles (research, plan_check, verifier, drift guard, TDD, code review, worktrees, compact content, and more — see `gsd-core/workflows/settings.md` for the current set)
-- Config merging and writing
-- Confirmation display with quick command references
+Mode routing:
+- **default** (no flag): Common-case toggles (model, research, plan_check, verifier, branching) → settings workflow
+- **--advanced**: Power-user knobs (planning tuning, timeouts, branch templates, cross-AI execution) → settings-advanced workflow
+- **--integrations**: Third-party API keys, code-review CLI routing, agent-skill injection → settings-integrations workflow
+- **--profile <name>**: Switch model profile (quality|balanced|budget|inherit) → set-profile (inline)
 </objective>
+
+<routing>
+
+| Flag | Action | Workflow |
+|------|--------|----------|
+| (none) | Interactive 5-question common-case config prompt | settings |
+| --advanced | Power-user knobs: planning, execution, discussion, cross-AI, git, runtime | settings-advanced |
+| --integrations | API keys (Brave/Firecrawl/Exa), review CLI routing, agent skills | settings-integrations |
+| --profile &lt;name&gt; | Switch model profile without interactive prompt | gsd-tools query config-set-model-profile |
+
+</routing>
 
 <execution_context>
 @~/.claude/gsd-core/workflows/settings.md
+@~/.claude/gsd-core/workflows/settings-advanced.md
+@~/.claude/gsd-core/workflows/settings-integrations.md
 </execution_context>
 
+<context>
+Arguments: $ARGUMENTS
+
+Parse the first token of $ARGUMENTS:
+- If it is `--advanced`: strip the flag, execute settings-advanced workflow
+- If it is `--integrations`: strip the flag, execute settings-integrations workflow
+- If it starts with `--profile`: extract the profile name (remainder after `--profile`), then:
+  1. Verify `gsd-tools` is on PATH via `command -v gsd-tools`; if absent, emit the install hint `Install GSD via 'npm i -g @opengsd/gsd-core'` and stop.
+  2. Run: `gsd-tools query config-set-model-profile <profile-name> --raw` and display the output verbatim.
+- Otherwise: execute settings workflow (no argument needed)
+</context>
+
 <process>
-Execute end-to-end.
+1. Parse the leading flag (if any) from $ARGUMENTS.
+2. Load and execute the appropriate workflow end-to-end, or run the inline SDK command for --profile.
+3. Preserve all workflow gates from the target workflow.
 </process>
