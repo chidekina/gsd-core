@@ -21,6 +21,7 @@ Full roster at `agents/gsd-*.md`. The "Primary doc" column flags whether [`docs/
 | gsd-project-researcher | Researches domain ecosystem before roadmap creation (stack, features, architecture, pitfalls). | `/gsd-new-project`, `/gsd-new-milestone` | primary |
 | gsd-phase-researcher | Researches implementation approach for a specific phase before planning. | `/gsd-plan-phase` | primary |
 | gsd-ui-researcher | Produces UI design contracts for frontend phases. | `/gsd-ui-phase` | primary |
+| gsd-nick-nope | [gsd-local] Known-mistakes scanner used as a pre-flight gate by pr-branch. | `/gsd-pr-branch` (nick_nope_gate step) | inventory only |
 | gsd-assumptions-analyzer | Produces evidence-backed assumptions for discuss-phase (assumptions mode). | `discuss-phase-assumptions` workflow | primary |
 | gsd-advisor-researcher | Researches a single gray-area decision during discuss-phase advisor mode. | `discuss-phase` workflow (advisor mode) | primary |
 | gsd-research-synthesizer | Combines parallel researcher outputs into a unified SUMMARY.md. | `/gsd-new-project` | primary |
@@ -143,6 +144,7 @@ These six routers are descriptor-only entries that the model picks first; the bo
 | Command | Role | Source |
 |---------|------|--------|
 | `/gsd-phase` | CRUD for phases — add (default), insert (`--insert`), remove (`--remove`), or edit (`--edit`) phases in ROADMAP.md. | [commands/gsd/phase.md](../commands/gsd/phase.md) |
+| `/gsd-brd-phase` | [gsd-local] Interview and write the per-phase BRD (business rules, personas, screen flows). | [commands/gsd/brd-phase.md](../commands/gsd/brd-phase.md) |
 | `/gsd-add-tests` | Generate tests for a completed phase based on UAT criteria and implementation. | [commands/gsd/add-tests.md](../commands/gsd/add-tests.md) |
 | `/gsd-validate-phase` | Retroactively audit and fill Nyquist validation gaps for a completed phase. | [commands/gsd/validate-phase.md](../commands/gsd/validate-phase.md) |
 | `/gsd-secure-phase` | Retroactively verify threat mitigations for a completed phase. | [commands/gsd/secure-phase.md](../commands/gsd/secure-phase.md) |
@@ -215,6 +217,7 @@ Full roster at `gsd-core/workflows/*.md`. Workflows are thin orchestrators that 
 
 | Workflow | Role | Invoked by |
 |----------|------|------------|
+| `brd-phase.md` | [gsd-local] Per-phase BRD interview workflow. | `/gsd-brd-phase` |
 | `add-backlog.md` | Add a backlog item to ROADMAP.md using 999.x numbering. | `/gsd-capture --backlog` |
 | `add-phase.md` | Add a new integer phase to the end of the current milestone in the roadmap. | `/gsd-phase` (default) |
 | `add-tests.md` | Generate unit and E2E tests for a completed phase based on its artifacts. | `/gsd-add-tests` |
@@ -339,6 +342,7 @@ Full roster at `gsd-core/references/*.md`. References are shared knowledge docum
 
 | Reference | Role |
 |-----------|------|
+| `brd-spec-context.md` | [gsd-local] How BRD and SPEC context is loaded and compared by plan/discuss/execute/resume. |
 | `checkpoints.md` | Checkpoint type definitions and interaction patterns. |
 | `gates.md` | 4 canonical gate types (Confirm, Quality, Safety, Transition) wired into plan-checker and verifier. |
 | `model-profiles.md` | Per-agent model tier assignments. |
