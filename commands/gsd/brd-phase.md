@@ -28,8 +28,8 @@ Capture WHAT a phase delivers from the business perspective before planning star
 </objective>
 
 <execution_context>
-@$HOME/.claude/get-shit-done/workflows/brd-phase.md
-@$HOME/.claude/get-shit-done/templates/brd.md
+@~/.claude/gsd-core/workflows/brd-phase.md
+@~/.claude/gsd-core/templates/brd.md
 </execution_context>
 
 <runtime_note>
