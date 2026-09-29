@@ -151,6 +151,7 @@
     "gsd-nyquist-auditor":        { "golden": "sonnet", "balanced": "sonnet", "budget": "haiku",  "phaseType": "verification", "routingTier": "light" },
     "gsd-pattern-mapper":         { "golden": "sonnet", "balanced": "sonnet", "budget": "haiku",  "phaseType": "planning",     "routingTier": "light" },
     "gsd-ui-researcher":          { "golden": "opus",   "balanced": "sonnet", "budget": "haiku",  "phaseType": "research",     "routingTier": "standard" },
+    "ui-quality":                 { "golden": "sonnet", "balanced": "sonnet", "budget": "haiku",  "phaseType": "verification", "routingTier": "light" },
     "gsd-ui-checker":             { "golden": "sonnet", "balanced": "sonnet", "budget": "haiku",  "phaseType": "verification", "routingTier": "light" },
     "gsd-ui-auditor":             { "golden": "sonnet", "balanced": "sonnet", "budget": "haiku",  "phaseType": "verification", "routingTier": "light" },
     "gsd-doc-writer":             { "golden": "opus",   "balanced": "sonnet", "budget": "haiku",  "phaseType": "execution",    "routingTier": "standard" },
