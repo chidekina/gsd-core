@@ -8,13 +8,15 @@
 # Enable with: "hooks": { "community": true } in .planning/config.json
 set -euo pipefail
 
+# Resolve project root via upward traversal (AUTO-01 / AUTO-02)
+CWD="${CLAUDE_CWD:-$(pwd)}"
+. "$HOME/.claude/hooks/gsd-find-project-root.sh"
+find_gsd_project_root "$CWD"
+[ -z "$PROJECT_ROOT" ] && exit 0
+
 # Check opt-in config — exit silently if not enabled
-if [ -f .planning/config.json ]; then
-  ENABLED=$(node -e "try{const c=require('./.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
-  if [ "$ENABLED" != "1" ]; then exit 0; fi
-else
-  exit 0
-fi
+ENABLED=$(node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
+[ "$ENABLED" != "1" ] && exit 0
 
 INPUT=$(cat)
 
