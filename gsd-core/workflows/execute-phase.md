@@ -94,7 +94,7 @@ AGENT_SKILLS=$(gsd_run query agent-skills gsd-executor)
 
 Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `padded_phase`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `phase_req_ids`, `response_language`, `requirements_path`, `section_manifest`, `threat_id_duplicate_count`.
 
-@$HOME/.claude/get-shit-done/references/brd-spec-context.md
+@~/.claude/gsd-core/references/brd-spec-context.md
 
 **BRD + SPEC comparison (per brd-spec-context.md):**
 ```bash
