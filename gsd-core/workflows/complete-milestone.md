@@ -634,6 +634,51 @@ Exact bash for each of the four options (squash, history-preserving merge, delet
 If `section_manifest` is `null` or `"git-tag"` is in its `included` list: read and execute `gsd-core/workflows/complete-milestone/steps/git-tag.md`. Otherwise skip — do not read the file; proceed to `git_commit_milestone`.
 <!-- /gsd:section -->
 
+<step name="archive_brds">
+
+Collect all BRD and SPEC files from this milestone's phases. These contain business rules and requirements that should be preserved at the milestone boundary.
+
+```bash
+MILESTONE_BRDS=$(find .planning/phases -name "*-BRD.md" 2>/dev/null | sort)
+MILESTONE_SPECS=$(find .planning/phases -name "*-SPEC.md" 2>/dev/null | grep -v AI-SPEC | sort)
+```
+
+**If any BRDs found:** Create a consolidated milestone BRD archive:
+```bash
+BRD_ARCHIVE=".planning/milestones/v[X.Y]-BRD-ARCHIVE.md"
+```
+
+Structure:
+```markdown
+# Milestone v[X.Y] — Business Rules Archive
+
+**Milestone:** [Name]
+**Phases:** [N]
+**Created:** [date]
+
+## Master Business Rules (cross-phase)
+
+[All unique business rules from all phase BRDs, deduplicated]
+
+## Per-Phase BRDs
+
+### Phase N: [Name]
+[Full content of phase N BRD]
+
+---
+```
+
+**If MASTER-BRD.md exists:** Include it at the top before per-phase BRDs.
+
+**If no BRDs found:** Skip silently — not all milestones have BRDs.
+
+Add to the safety commit:
+```bash
+gsd-sdk query commit "docs: archive BRDs + SPECs for v[X.Y] milestone" --files "${BRD_ARCHIVE}"
+```
+
+</step>
+
 <step name="git_commit_milestone">
 
 Commit the REQUIREMENTS.md deletion (archive files and ROADMAP.md were already committed in the safety commit in `reorganize_roadmap_and_delete_originals`).
@@ -658,6 +703,7 @@ Shipped:
 Archived:
 - milestones/v[X.Y]-ROADMAP.md
 - milestones/v[X.Y]-REQUIREMENTS.md
+- milestones/v[X.Y]-BRD-ARCHIVE.md (if BRDs existed)
 
 Summary: .planning/MILESTONES.md
 Tag: v[X.Y]
