@@ -59,6 +59,20 @@ const cacheFile = path.join(cacheDir, updateCacheFileName);
 const projectVersionFile = path.join(projectConfigDir, 'gsd-core', 'VERSION');
 const globalVersionFile = path.join(globalConfigDir, 'gsd-core', 'VERSION');
 
+// 🔴 UM LADRILHO MUDO NAO SABE DIZER "NAO ESTOU MEDINDO" (Phase 119, DEBT-04).
+// Este hook nunca imprime nada sincrono — ele dispara um worker em background. Quando NENHUM
+// arquivo VERSION do GSD e encontrado (nem no projeto, nem no global), o worker nao tem o que
+// comparar e a checagem de update simplesmente nao acontece: o resultado e byte-a-byte igual ao
+// de uma checagem que rodou e nao achou update. Essa e a classe medida nesta casa no
+// `decisions-trail` (28 dias) e no `daily-insight` (~540 corridas sem uma linha).
+// A linha nomeia os dois caminhos consultados — quem le sabe onde repor.
+// Silencio fica reservado ao caso saudavel: pelo menos um VERSION existe.
+if (!fs.existsSync(projectVersionFile) && !fs.existsSync(globalVersionFile)) {
+  process.stdout.write(
+    '\u26a0 gsd-check-update: no GSD VERSION file found (' + projectVersionFile + ', ' +
+    globalVersionFile + ') — a checagem de update NAO esta rodando (nao estou medindo)\n');
+}
+
 // Ensure cache directory exists
 if (!fs.existsSync(cacheDir)) {
   fs.mkdirSync(cacheDir, { recursive: true });
