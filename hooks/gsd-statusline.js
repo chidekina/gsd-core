@@ -943,7 +943,7 @@ function runStatusline() {
         if (staleWarning === 'dev') {
           gsdUpdate += '\x1b[33m⚠ dev install — re-run installer to sync hooks\x1b[0m │ ';
         } else if (staleWarning === 'stale') {
-          gsdUpdate += '\x1b[31m⚠ stale hooks — run /gsd:update\x1b[0m │ ';
+          gsdUpdate += '\x1b[31m⚠ stale hooks — reinstall from the fork (see README)\x1b[0m │ ';
         }
       } catch (e) {}
     }
