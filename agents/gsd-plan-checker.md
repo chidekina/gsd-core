@@ -842,7 +842,7 @@ The `tasks` array in the result shows each task's completeness:
 
 **For manual validation of specificity** (`verify.plan-structure` checks structure, not content quality), use structured extraction instead of grepping raw XML:
 ```bash
-gsd_run query plan.task-structure "$PLAN_PATH"
+gsd_run query verify.plan-structure "$PLAN_PATH"
 ```
 Inspect `tasks` in the JSON; open the PLAN in the editor for prose-level review.
 
@@ -872,7 +872,7 @@ Missing: No mention of fetch/API call → Issue: Key link not planned
 ## Step 8: Assess Scope
 
 ```bash
-gsd_run query plan.task-structure "$PHASE_DIR/$PHASE-01-PLAN.md"
+gsd_run query verify.plan-structure "$PHASE_DIR/$PHASE-01-PLAN.md"
 gsd_run query frontmatter.get "$PHASE_DIR/$PHASE-01-PLAN.md" files_modified
 ```
 
