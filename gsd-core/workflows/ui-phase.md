@@ -1,5 +1,5 @@
 <purpose>
-Generate a UI design contract (UI-SPEC.md) for frontend phases. Orchestrates gsd-ui-researcher and gsd-ui-checker with a revision loop. Inserts between discuss-phase and plan-phase in the lifecycle.
+Generate a UI design contract (UI-SPEC.md) for frontend phases. Orchestrates gsd-ui-researcher and ui-quality (mode=gate) with a revision loop. Inserts between discuss-phase and plan-phase in the lifecycle.
 
 UI-SPEC.md locks spacing, typography, color, copywriting, and design system decisions before the planner creates tasks. This prevents design debt caused by ad-hoc styling decisions during execution.
 </purpose>
@@ -11,7 +11,7 @@ UI-SPEC.md locks spacing, typography, color, copywriting, and design system deci
 <available_agent_types>
 Valid GSD subagent types (use exact names — do not fall back to 'general-purpose'):
 - gsd-ui-researcher — Researches UI/UX approaches
-- gsd-ui-checker — Reviews UI implementation quality
+- ui-quality — UI quality agent; spawn with mode=gate here to verify UI-SPEC.md (BLOCK/FLAG/PASS)
 </available_agent_types>
 
 <process>
@@ -23,7 +23,7 @@ _GSD_SHIM_NAME="gsd-tools.cjs"; _GSD_RUNTIME_ROOT="${RUNTIME_DIR:-$(git rev-pars
 INIT=$(gsd_run query init.plan-phase "$PHASE")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 AGENT_SKILLS_UI=$(gsd_run query agent-skills gsd-ui-researcher)
-AGENT_SKILLS_UI_CHECKER=$(gsd_run query agent-skills gsd-ui-checker)
+AGENT_SKILLS_UI_CHECKER=$(gsd_run query agent-skills ui-quality)
 ```
 
 Parse JSON for: `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `padded_phase`, `has_context`, `has_research`, `commit_docs`, `response_language`.
@@ -41,7 +41,7 @@ Resolve UI agent models:
 
 ```bash
 UI_RESEARCHER_MODEL=$(gsd_run query resolve-model gsd-ui-researcher --raw)
-UI_CHECKER_MODEL=$(gsd_run query resolve-model gsd-ui-checker --raw)
+UI_CHECKER_MODEL=$(gsd_run query resolve-model ui-quality --raw)
 ```
 
 Check config:
@@ -146,6 +146,7 @@ Answer: "What visual and interaction contracts does this phase need?"
 - {context_path} (USER DECISIONS from /gsd:discuss-phase)
 - {research_path} (Technical Research — stack decisions)
 - {SKETCH_FINDINGS_PATH} (Sketch Findings — validated design decisions, CSS patterns, visual direction from /gsd:sketch, if exists)
+- {BRD_PATH} (Business Requirements — screen flows and personas from /gsd-brd-phase, if exists)
 </required_reading>
 
 ${AGENT_SKILLS_UI}
@@ -161,6 +162,18 @@ phase_dir: {phase_dir}
 padded_phase: {padded_phase}
 </config>
 ```
+
+**BRD screen flow injection:** Before spawning gsd-ui-researcher, check:
+```bash
+BRD_PATH=$(ls "${PHASE_DIR}"/*-BRD.md 2>/dev/null | head -1 || true)
+```
+If found: pass `BRD_PATH` in `<required_reading>` above AND prepend this instruction to the researcher prompt:
+```
+BRD.md is present. The "Screen Flows" section contains text wireframes agreed with the product owner.
+Use these as the PRIMARY source for layout structure and user flow. UI-SPEC may refine typography/spacing/color
+but must NOT contradict the wireframe steps or add/remove screens without flagging it.
+```
+If not found: omit silently.
 
 Omit null file paths from `<required_reading>`.
 
@@ -191,7 +204,7 @@ Display confirmation. Continue to step 7.
 **If `## UI-SPEC BLOCKED`:**
 Display blocker details and options. Exit workflow.
 
-## 7. Spawn gsd-ui-checker
+## 7. Spawn ui-quality (mode=gate)
 
 Display:
 ```
@@ -203,11 +216,13 @@ Display:
 Build prompt:
 
 ```markdown
-Read ~/.claude/agents/gsd-ui-checker.md for instructions.
+Read ~/.claude/agents/ui-quality.md for instructions.
+
+mode: gate
 
 <objective>
 Validate UI design contract for Phase {phase_number}: {phase_name}
-Check all 7 dimensions. Return APPROVED or BLOCKED.
+Operate in mode=gate (read-only). Check all 7 dimensions. Return APPROVED or BLOCKED.
 </objective>
 
 <required_reading>
@@ -226,9 +241,9 @@ ui_safety_gate: {ui_safety_gate config value}
 ```
 Agent(
   prompt=ui_checker_prompt,
-  subagent_type="gsd-ui-checker",
+  subagent_type="ui-quality",
   model="{UI_CHECKER_MODEL}",
-  description="Verify UI-SPEC Phase {N}"
+  description="Verify UI-SPEC Phase {N} (mode=gate)"
 )
 ```
 
@@ -525,7 +540,7 @@ gsd_run query state.record-session \
 - [ ] Existing UI-SPEC handled (update/view/skip)
 - [ ] gsd-ui-researcher spawned with correct context and file paths
 - [ ] UI-SPEC.md created in correct location
-- [ ] gsd-ui-checker spawned with UI-SPEC.md
+- [ ] ui-quality (mode=gate) spawned with UI-SPEC.md
 - [ ] All 7 dimensions evaluated
 - [ ] Revision loop if BLOCKED (max 2 iterations)
 - [ ] Final status displayed with next steps
