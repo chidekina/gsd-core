@@ -148,6 +148,26 @@ Otherwise: Apply checkpoint-based routing below.
 
 **Pattern C:** Execute in main using standard flow (step name="execute").
 
+### Within-Plan Parallel Task Groups
+
+After routing is determined (Pattern A/B/C), scan the plan for `parallel="true"` tasks:
+
+```bash
+PARALLEL_TASKS=$(grep -n 'parallel="true"' "${PLAN_PATH}" | wc -l)
+```
+
+**If `PARALLEL_TASKS > 0` and Pattern is A or C:**
+
+During task execution, when encountering a contiguous group of `parallel="true"` tasks:
+1. Collect all consecutive `parallel="true"` tasks as a group
+2. Dispatch each as a separate `gsd-executor` subagent with scope limited to that single task
+3. Wait for all group agents to complete before proceeding
+4. If any group agent fails: abort remaining group agents, surface error to user
+
+**If Pattern is B (segmented):** Parallel task groups within a segment follow the same grouping logic.
+
+**Single parallel task:** If only one `parallel="true"` task exists (no adjacent parallel tasks), treat as sequential — no parallel benefit.
+
 Fresh context per subagent preserves peak quality. Main context stays lean.
 </step>
 
