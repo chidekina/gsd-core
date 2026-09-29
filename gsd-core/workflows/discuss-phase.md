@@ -8,6 +8,7 @@ consumes:
 <purpose>
 Extract implementation decisions that downstream agents need. Analyze the phase to identify gray areas, let the user choose what to discuss, then deep-dive each selected area until satisfied.
 
+@$HOME/.claude/get-shit-done/references/brd-spec-context.md
 You are a thinking partner, not an interviewer. The user is the visionary — you are the builder. Your job is to capture decisions that will guide research and planning, not to figure out implementation yourself.
 </purpose>
 
@@ -188,6 +189,21 @@ ls ${phase_dir}/*-SPEC.md 2>/dev/null | grep -v AI-SPEC | head -1 || true
 1. Read the SPEC.md file.
 2. Count requirements (numbered items in `## Requirements`).
 3. Display: `Found SPEC.md — {N} requirements locked. Focusing on implementation decisions.`
+
+**Load BRD.md if present:**
+```bash
+BRD_FILE=$(ls ${phase_dir}/*-BRD.md 2>/dev/null | head -1 || true)
+```
+
+**If BRD.md is found:**
+1. Read the BRD.md file.
+2. Extract: business rules count, personas, screen flows list.
+3. Display: `Found BRD.md — {N} business rules, {M} personas, {K} screen flows loaded.`
+4. Set `brd_loaded = true`.
+5. Store business rules, personas, and screen flows as `<brd_context>`.
+6. **Discussion impact:** During gray area analysis (`analyze_phase`), skip any question already answered by BRD (e.g., "who can do X" if BRD defines it as a business rule). Surface BRD constraints when relevant — "BRD says only admins can approve — implementation must enforce this."
+
+**If no BRD.md is found:** Continue with `brd_loaded = false`. No warning — BRD is upstream of discuss-phase; plan-phase already gates on it.
 4. Set `spec_loaded = true`.
 5. Store requirements, boundaries, and acceptance criteria as `<locked_requirements>` — these flow directly into CONTEXT.md without re-asking.
 
