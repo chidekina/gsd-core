@@ -10,7 +10,7 @@ Create executable phase prompts (PLAN.md files) for a roadmap phase with integra
 </purpose>
 
 <required_reading>
-@$HOME/.claude/get-shit-done/references/brd-spec-context.md
+@~/.claude/gsd-core/references/brd-spec-context.md
 Read all files referenced by the invoking prompt's execution_context before starting.
 
 @~/.claude/gsd-core/references/ui-brand.md
