@@ -103,3 +103,56 @@ describe('[gsd-local] --portable-hooks migrates an existing install to the node 
     assert.ok(managedJs(again).filter((c) => CHAIN.test(c)).length >= 5);
   });
 });
+
+// Unit arms on the function itself (review of gsd-core#2). The fake builder
+// returns a marker so the test sees WHICH script name was re-derived, and the
+// config dir decides which script directories are GSD's.
+describe('[gsd-local] reconcileManagedChainCommandsToRunner: which commands it owns', () => {
+  const hooksSurface = require('../gsd-core/bin/lib/runtime-hooks-surface.cjs');
+  const ROOT = '/cfg/.claude';
+  const PREFIX = '"$(for n in "/usr/bin/node" "$(command -v node)"; do [ -x "$n" ] && printf \'%s\' "$n" && break; done)" ';
+  const build = (hookFile) => `RUNNER ${hookFile}`;
+  const run = (command, extra = {}) => {
+    const s = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command, ...extra }] }] } };
+    const changed = hooksSurface.reconcileManagedChainCommandsToRunner(s, build, ROOT);
+    return { changed, command: s.hooks.PreToolUse[0].hooks[0].command };
+  };
+
+  test('double-quoted managed script in the config hooks dir migrates (control)', () => {
+    assert.deepEqual(run(PREFIX + `"${ROOT}/hooks/gsd-prompt-guard.js"`), { changed: true, command: 'RUNNER gsd-prompt-guard.js' });
+  });
+
+  test('single-quoted managed script migrates (upstream keeps legacy single quotes in the chain)', () => {
+    assert.deepEqual(run(PREFIX + `'${ROOT}/hooks/gsd-prompt-guard.js'`), { changed: true, command: 'RUNNER gsd-prompt-guard.js' });
+  });
+
+  test('bare managed script migrates', () => {
+    assert.deepEqual(run(PREFIX + `${ROOT}/hooks/gsd-prompt-guard.js`), { changed: true, command: 'RUNNER gsd-prompt-guard.js' });
+  });
+
+  test('a managed name in a FOREIGN directory is never pointed at GSD\'s copy', () => {
+    for (const p of ['/home/u/own-tools/gsd-prompt-guard.js', '/opt/other-claude/hooks/gsd-read-guard.js', 'gsd-prompt-guard.js']) {
+      const cmd = PREFIX + JSON.stringify(p);
+      assert.deepEqual(run(cmd), { changed: false, command: cmd }, p);
+    }
+  });
+
+  test('the $HOME form of the config hooks dir is GSD\'s too', () => {
+    const os = require('node:os');
+    const home = os.homedir();
+    const cmd = PREFIX + `"$HOME/.claude/hooks/gsd-prompt-guard.js"`;
+    const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: cmd }] }] } };
+    assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, path.join(home, '.claude')), true);
+    assert.equal(s.hooks.PreToolUse[0].hooks[0].command, 'RUNNER gsd-prompt-guard.js');
+  });
+
+  test('extra arguments after the script are never dropped', () => {
+    const cmd = PREFIX + `"${ROOT}/hooks/gsd-prompt-guard.js" --strict`;
+    assert.deepEqual(run(cmd), { changed: false, command: cmd });
+  });
+
+  test('an args-form entry is left alone', () => {
+    const cmd = PREFIX + `"${ROOT}/hooks/gsd-prompt-guard.js"`;
+    assert.deepEqual(run(cmd, { args: ['x'] }), { changed: false, command: cmd });
+  });
+});

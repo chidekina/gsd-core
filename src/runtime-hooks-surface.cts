@@ -774,9 +774,10 @@ function rewriteLegacyManagedNodeHookCommands(settings: Settings, runnerToken: s
 }
 
 // [gsd-local] A managed JS hook command in the inline-chain shape, with the
-// script as its single quoted (or bare) argument. Anything with extra tokens
-// is left alone, like the rewriter above leaves args-form entries alone.
-const CHAIN_SINGLE_SCRIPT = /^"\$\(for n in [\s\S]*?printf '%s' "\$n" && break; done\)"\s+(?:"([^"]+)"|(\S+))\s*$/;
+// script as its single argument: double-quoted, single-quoted (the rewriter
+// above keeps a legacy single-quoted token as-is) or bare. Anything with extra
+// tokens is left alone, like the rewriter above leaves args-form entries alone.
+const CHAIN_SINGLE_SCRIPT = /^"\$\(for n in [\s\S]*?printf '%s' "\$n" && break; done\)"\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*$/;
 
 /**
  * [gsd-local] Migrate an existing install to the portable node runner.
@@ -788,16 +789,26 @@ const CHAIN_SINGLE_SCRIPT = /^"\$\(for n in [\s\S]*?printf '%s' "\$n" && break; 
  * PreToolUse guard fails open; the fail-closed branch is only in
  * hooks/gsd-node-runner.sh (ADR-0135 Decisão 4 b).
  *
- * Only commands whose single script argument has a managed basename are
- * re-derived, through the same `buildCommand` the installer uses to register
- * that hook, so the result is byte-identical to a fresh portable install.
- * The caller decides when this runs (portable global installs only).
+ * Only commands whose single script argument has a managed basename AND lives
+ * in this config's hooks dir (absolute or `$HOME` form) are re-derived: the
+ * builder discards the directory, so a same-named script elsewhere would be
+ * silently pointed at GSD's copy. They go through the same `buildCommand` the
+ * installer uses to register that hook, so each migrated JS hook command is
+ * byte-identical to a fresh portable install's. Not the whole file: `.sh`
+ * hooks and statusLine keep their existing form (only-if-absent registration),
+ * which is not a fail-open. The caller decides when this runs (portable global
+ * installs only).
  */
 function reconcileManagedChainCommandsToRunner(
   settings: Settings,
   buildCommand: (hookFile: string) => string | null,
+  configDir: string,
 ): boolean {
-  if (!settings || !settings.hooks || typeof buildCommand !== 'function') return false;
+  if (!settings || !settings.hooks || typeof buildCommand !== 'function' || !configDir) return false;
+  const ownedDirs = new Set([
+    shellCmdProjection.posixNormalize(configDir) + '/hooks',
+    shellCmdProjection.projectPortableHookBaseDir({ configDir, homeDir: os.homedir() }) + '/hooks',
+  ]);
   let changed = false;
   for (const entries of Object.values(settings.hooks)) {
     if (!Array.isArray(entries)) continue;
@@ -808,9 +819,10 @@ function reconcileManagedChainCommandsToRunner(
         if (Array.isArray(h.args) && h.args.length > 0) continue;
         const m = h.command.trim().match(CHAIN_SINGLE_SCRIPT);
         if (!m) continue;
-        const scriptPath = m[1] || m[2] || '';
+        const scriptPath = shellCmdProjection.posixNormalize(m[1] || m[2] || m[3] || '');
+        if (!ownedDirs.has(path.posix.dirname(scriptPath))) continue;
         if (!isManagedHookBasename(scriptPath, { surface: 'settings-json' })) continue;
-        const next = buildCommand(path.basename(scriptPath.replace(/\\/g, '/')));
+        const next = buildCommand(path.posix.basename(scriptPath));
         if (!next || next === h.command) continue;
         h.command = next;
         changed = true;

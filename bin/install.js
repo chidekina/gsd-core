@@ -13389,6 +13389,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
   if (hasPortableHooks && isGlobal && hooksSurface.reconcileManagedChainCommandsToRunner(
     settings,
     (hookFile) => buildHookCommand(targetDir, hookFile, hookOpts),
+    targetDir,
   )) {
     console.log(`  ${green}✓${reset} Migrated managed hook commands to the portable node runner [gsd-local]`);
   }
