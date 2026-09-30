@@ -15,7 +15,8 @@
 set -uo pipefail
 
 # [gsd-local] node through the runner (hooks/gsd-node-runner.sh, one level up)
-gsd_node() { sh "$(cd "$(dirname "$0")/.." && pwd)/gsd-node-runner.sh" "${GSD_NODE:-}" "$@"; }
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { sh "$(cd "$(dirname "$0")/.." && pwd)/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
 STATUS_FILE="${1:?STATUS_FILE required}"
 LOCK_FILE="${2:?LOCK_FILE required}"

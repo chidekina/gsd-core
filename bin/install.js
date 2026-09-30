@@ -1315,6 +1315,15 @@ const resolveNodeRunner = hooksSurface.resolveNodeRunner;
 // absolute node path tried FIRST, then `command -v node`, then well-known
 // layouts, resolved by the shell at hook-fire time instead of bake time.
 const buildNodeRunnerChainToken = hooksSurface.buildNodeRunnerChainToken;
+// [gsd-local] stamp the install-time node (shell-quoted, the same token the
+// portable resolver gets as its first argument) into .sh hooks that call
+// node through gsd-node-runner.sh. Unstamped, {{GSD_NODE_TOKEN}} is a
+// non-absolute literal and the runner falls through to its fallbacks.
+function stampGsdNodeToken(content) {
+  if (!content.includes('{{GSD_NODE_TOKEN}}')) return content;
+  const token = hooksSurface.buildBakedNodeToken();
+  return token ? content.replace(/\{\{GSD_NODE_TOKEN\}\}/g, () => token) : content;
+}
 const resolveBashRunner = hooksSurface.resolveBashRunner;
 // referencesHook: pure predicate over hook entry objects, shared between
 // install() and finishInstall() (ADR-857 phase 5f-1b).
@@ -10726,6 +10735,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
       } else if (entry.endsWith('.sh')) {
         let content = fs.readFileSync(s, 'utf8');
         content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+        content = stampGsdNodeToken(content);
         fs.writeFileSync(d, content);
         try { fs.chmodSync(d, 0o755); } catch (_) { /* Windows */ }
       } else {
@@ -12058,6 +12068,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             if (entry.endsWith('.sh')) {
               let content = fs.readFileSync(srcFile, 'utf8');
               content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+              content = stampGsdNodeToken(content);
               fs.writeFileSync(destFile, content);
               try { fs.chmodSync(destFile, 0o755); } catch (e) { /* Windows doesn't support chmod */ }
             } else {
@@ -12079,6 +12090,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             if (subEntry.endsWith('.sh')) {
               let content = fs.readFileSync(subSrcFile, 'utf8');
               content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+              content = stampGsdNodeToken(content);
               fs.writeFileSync(subDestFile, content);
               try { fs.chmodSync(subDestFile, 0o755); } catch (e) { /* Windows */ }
             } else {

@@ -47,11 +47,24 @@ set -uo pipefail
 # `2>/dev/null || fallback` shapes turned that into a silent exit 0. The
 # runner names what it tried and exits 1 on PostToolUse.
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-}" "$@"; }
+# The installer stamps the install-time node here (as the JS hooks get it in
+# their command); unstamped, the literal is not an absolute path and the
+# runner falls through to its fallbacks.
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
 # Gate 1 — tool_name == Bash; extract command
 INPUT=$(cat 2>/dev/null || true)
 [ -n "$INPUT" ] || exit 0
+
+# [gsd-local] shell pre-filters, SUPERSETS of Gates 2 and 5, so the common
+# path spawns no node: a missing node is reported only when a HEAD-advancing
+# command runs in a project that asks for auto_update.
+case "$INPUT" in
+  *"git commit"*|*"git merge"*|*"git pull"*|*"git rebase --continue"*|*"git cherry-pick"*|*"gsd-tools query commit"*) ;;
+  *) exit 0 ;;
+esac
+grep -q '"auto_update"[[:space:]]*:[[:space:]]*true' .planning/config.json 2>/dev/null || exit 0
 
 TOOL_INFO=$(printf '%s' "$INPUT" | gsd_node -e '
 let d = "";

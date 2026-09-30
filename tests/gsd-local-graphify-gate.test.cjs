@@ -40,6 +40,30 @@ function postToolCommands(settings) {
 
 const countGraphify = (settings) => postToolCommands(settings).filter((c) => c.includes('gsd-graphify-update')).length;
 
+// Stage the hook (and optionally the runner) into a scratch HOME with a GSD
+// project whose config says `config`, then fire one PostToolUse payload.
+function fireHook(t, label, { command, config, withRunner = true, env = {}, hookSrc = HOOK_SRC }) {
+  const home = createTempDir(`gsd-local-graphify-${label}-`);
+  t.after(() => cleanup(home));
+  const hooks = path.join(home, '.claude', 'hooks');
+  fs.mkdirSync(hooks, { recursive: true });
+  fs.copyFileSync(hookSrc, path.join(hooks, 'gsd-graphify-update.sh'));
+  if (withRunner) fs.copyFileSync(RESOLVER_SRC, path.join(hooks, 'gsd-node-runner.sh'));
+  const project = path.join(home, 'proj');
+  fs.mkdirSync(path.join(project, '.planning'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.planning', 'config.json'), JSON.stringify(config) + '\n');
+  const emptyBin = createTempDir('gsd-local-graphify-emptybin-');
+  t.after(() => cleanup(emptyBin));
+  return runHook(path.join(hooks, 'gsd-graphify-update.sh'), [], {
+    interpreter: 'bash',
+    cwd: project,
+    input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command } }),
+    env: { ...process.env, HOME: home, CI: '', PATH: `${emptyBin}:/usr/bin:/bin`, GSD_NODE_RUNNER_NO_FALLBACKS: '1', ...env },
+    timeoutMs: 20000,
+  });
+}
+const AUTO = { graphify: { enabled: true, auto_update: true } };
+
 describe('[gsd-local] graphify hook registration follows ~/.gsd/defaults.json', () => {
   test('not registered when no user default enables graphify', (t) => {
     const root = createTempDir('gsd-local-graphify-off-');
@@ -91,6 +115,23 @@ describe('[gsd-local] graphify removal and other surfaces (PR #1 review)', () =>
     assert.strictEqual(countGraphify(after), 1, 'control: the user entry is still the only graphify-named one');
   });
 
+  // PR #1 re-review LOW: the name-substring has-check made a user wrapper
+  // count as "already registered", so enabling registered nothing, silently.
+  test('enabling registers the managed hook even beside a similarly named user hook', (t) => {
+    const root = createTempDir('gsd-local-graphify-user-enable-');
+    t.after(() => cleanup(root));
+    const settings = install(root);
+    settings.hooks.PostToolUse.push({
+      matcher: 'Bar',
+      hooks: [{ type: 'command', command: '/home/me/my-gsd-graphify-update-wrapper.sh' }],
+    });
+    fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify(settings, null, 2) + '\n');
+    setGraphifyDefault(root, true);
+    const after = install(root);
+    assert.strictEqual(countGraphify(after), 2, 'managed graphify hook was not registered next to the user entry');
+    assert.ok(postToolCommands(after).includes('/home/me/my-gsd-graphify-update-wrapper.sh'), 'user entry must survive');
+  });
+
   test('kimi config.toml follows the same opt-in', (t) => {
     const off = createTempDir('gsd-local-graphify-kimi-off-');
     const on = createTempDir('gsd-local-graphify-kimi-on-');
@@ -123,47 +164,66 @@ describe('[gsd-local] gsd-graphify-update.sh resolves node through the runner', 
     }
   });
 
-  test('with no node anywhere the hook fails visibly instead of passing silently', (t) => {
+
+  test('with no node, a commit in an auto_update project fails visibly', (t) => {
     if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
-    const home = createTempDir('gsd-local-graphify-nonode-');
-    t.after(() => cleanup(home));
-    const hooks = path.join(home, '.claude', 'hooks');
-    fs.mkdirSync(hooks, { recursive: true });
-    fs.copyFileSync(HOOK_SRC, path.join(hooks, 'gsd-graphify-update.sh'));
-    fs.copyFileSync(RESOLVER_SRC, path.join(hooks, 'gsd-node-runner.sh'));
-    const project = path.join(home, 'proj');
-    fs.mkdirSync(path.join(project, '.planning'), { recursive: true });
-    fs.writeFileSync(path.join(project, '.planning', 'config.json'), '{}\n');
-    const emptyBin = createTempDir('gsd-local-graphify-emptybin-');
-    t.after(() => cleanup(emptyBin));
-    const r = runHook(path.join(hooks, 'gsd-graphify-update.sh'), [], {
-      interpreter: 'bash',
-      cwd: project,
-      input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m x' } }),
-      env: { ...process.env, HOME: home, CI: '', PATH: `${emptyBin}:/usr/bin:/bin`, GSD_NODE_RUNNER_NO_FALLBACKS: '1' },
-      timeoutMs: 20000,
-    });
+    const r = fireHook(t, 'nonode', { command: 'git commit -m x', config: AUTO });
     assert.strictEqual(r.exitCode, 1, `stderr: ${r.stderr}`);
     assert.match(r.stderr, /gsd-node-runner: no usable node found/);
   });
 
+  // PR #1 review finding 6 (operator: fix now): the no-node error must not
+  // fire on every Bash call. Shell pre-filters run before any node spawn.
+  test('with no node, a non-commit command exits 0 silently', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const r = fireHook(t, 'nonode-ls', { command: 'ls', config: AUTO });
+    assert.strictEqual(r.exitCode, 0, `stderr: ${r.stderr}`);
+    assert.strictEqual(r.stderr, '');
+  });
+
+  test('with no node, a commit in a project without auto_update exits 0 silently', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const r = fireHook(t, 'nonode-off', { command: 'git commit -m x', config: { graphify: { enabled: true } } });
+    assert.strictEqual(r.exitCode, 0, `stderr: ${r.stderr}`);
+    assert.strictEqual(r.stderr, '');
+  });
+
   test('a missing runner still exits 1, never 2 (PostToolUse must not block)', (t) => {
     if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
-    const home = createTempDir('gsd-local-graphify-norunner-');
-    t.after(() => cleanup(home));
-    const hooks = path.join(home, '.claude', 'hooks');
-    fs.mkdirSync(hooks, { recursive: true });
-    fs.copyFileSync(HOOK_SRC, path.join(hooks, 'gsd-graphify-update.sh'));
-    const project = path.join(home, 'proj');
-    fs.mkdirSync(path.join(project, '.planning'), { recursive: true });
-    fs.writeFileSync(path.join(project, '.planning', 'config.json'), '{}\n');
-    const r = runHook(path.join(hooks, 'gsd-graphify-update.sh'), [], {
-      interpreter: 'bash',
-      cwd: project,
-      input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }),
-      env: { ...process.env, HOME: home, CI: '' },
-      timeoutMs: 20000,
-    });
+    const r = fireHook(t, 'norunner', { command: 'git commit -m x', config: AUTO, withRunner: false });
     assert.strictEqual(r.exitCode, 1, `stderr: ${r.stderr}`);
+  });
+});
+
+// PR #1 review finding 5 (operator: fix now): the installer stamps the
+// install-time node into the graphify scripts, as the JS hooks get it.
+describe('[gsd-local] graphify scripts carry the install-time node', () => {
+  test('installed script and helper are stamped with the baked node', (t) => {
+    const root = createTempDir('gsd-local-graphify-stamp-');
+    t.after(() => cleanup(root));
+    install(root);
+    for (const rel of ['hooks/gsd-graphify-update.sh', 'hooks/lib/gsd-graphify-rebuild.sh']) {
+      const body = fs.readFileSync(path.join(root, rel), 'utf8');
+      assert.ok(!body.includes('{{GSD_NODE_TOKEN}}'), `${rel} left unstamped`);
+      const m = body.match(/^GSD_NODE_BAKED=("[^"\n]*")$/m);
+      assert.ok(m, `${rel} has no GSD_NODE_BAKED line`);
+      assert.ok(/\/node(\.exe)?"$/.test(m[1]), `${rel} baked token is not a node path: ${m[1]}`);
+    }
+  });
+
+  test('stamped script resolves node with no node on PATH', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const root = createTempDir('gsd-local-graphify-stamp-run-');
+    t.after(() => cleanup(root));
+    install(root);
+    // The stamped copy runs with no node on PATH and no fallbacks; it must
+    // get past Gate 1 (no runner diagnostic) and stop at a later gate.
+    const r = fireHook(t, 'stamped', {
+      command: 'git commit -m x',
+      config: AUTO,
+      hookSrc: path.join(root, 'hooks', 'gsd-graphify-update.sh'),
+    });
+    assert.ok(!/gsd-node-runner: no usable node found/.test(r.stderr), `stderr: ${r.stderr}`);
+    assert.strictEqual(r.exitCode, 0, `stderr: ${r.stderr}`);
   });
 });

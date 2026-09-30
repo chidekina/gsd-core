@@ -2908,6 +2908,13 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
       entry.hooks && entry.hooks.some((h: HookEntry) => referencesHook(h as Record<string, unknown>, 'gsd-graphify-update'))
     );
     const graphifyUpdateFile = path.join(targetDir, 'hooks', 'gsd-graphify-update.sh');
+    // [gsd-local] hasGraphifyUpdateHook above stays literal (docs-hooks-table-
+    // parity parses it) but is a name-substring match: a user hook named like
+    // my-gsd-graphify-update-wrapper.sh would count as ours and block the
+    // registration silently. The decision uses the exact-basename check.
+    const hasManagedGraphifyHook = hasGraphifyUpdateHook && settings.hooks[postToolEvent].some((entry: HookGroup) =>
+      entry.hooks && entry.hooks.some((h: HookEntry) => isManagedGraphifyHook(h))
+    );
     // [gsd-local] register only when the user-level defaults opt in; an
     // earlier registration is removed once they no longer do, so the hook is
     // not spawned after every Bash call in projects that never enable it.
@@ -2921,7 +2928,7 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
       if (JSON.stringify(settings.hooks[postToolEvent]) !== before) {
         console.log(`  ${green}✓${reset} Removed graphify auto-update hook (graphify.enabled is not set in ~/.gsd/defaults.json)`);
       }
-    } else if (!hasGraphifyUpdateHook && fs.existsSync(graphifyUpdateFile) && graphifyUpdateCommand) {
+    } else if (!hasManagedGraphifyHook && fs.existsSync(graphifyUpdateFile) && graphifyUpdateCommand) {
       settings.hooks[postToolEvent].push({
         matcher: 'Bash',
         hooks: [
@@ -2933,9 +2940,9 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
         ]
       });
       console.log(`  ${green}✓${reset} Configured graphify auto-update hook (opt-in via graphify.auto_update)`);
-    } else if (!hasGraphifyUpdateHook && !fs.existsSync(graphifyUpdateFile)) {
+    } else if (!hasManagedGraphifyHook && !fs.existsSync(graphifyUpdateFile)) {
       console.warn(`  ${yellow}⚠${reset}  Skipped graphify auto-update hook — gsd-graphify-update.sh not found at target`);
-    } else if (!hasGraphifyUpdateHook && !graphifyUpdateCommand) {
+    } else if (!hasManagedGraphifyHook && !graphifyUpdateCommand) {
       console.warn(`  ${yellow}⚠${reset}  Skipped graphify auto-update hook — Bash executable path unavailable (#3393)`);
     }
 
@@ -3587,6 +3594,7 @@ export = {
   normalizeNodePath,
   resolveNodeRunner,
   buildNodeRunnerChainToken,
+  buildBakedNodeToken,
   resolveBashRunner,
   NODE_RUNNER_RESOLVER_HOOK,
 
