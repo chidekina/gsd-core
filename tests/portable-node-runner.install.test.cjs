@@ -414,6 +414,70 @@ describe('#3662 runtime-resolving managed hook runners', () => {
       assert.ok(result.stderr.length > 0, 'resolver produced no stderr diagnostic');
       assert.ok(!/\bnode\b\s+\S*gsd-statusline/.test(result.stderr + result.stdout), 'resolver leaked a bare-node invocation');
     });
+
+    // [gsd-local] Claude Code only blocks on exit 2, and what "block" means
+    // depends on the event: on PreToolUse it denies the tool (a guard with no
+    // node fails CLOSED), on Stop/SubagentStop it forces the model to keep
+    // going (a missing node would loop every stop). So the no-node exit code
+    // is chosen from the hook_event_name on stdin: 2 for PreToolUse, 1 for
+    // everything else (visible, non-blocking).
+    function runResolverWithoutNode(t, label, input) {
+      const { home, configDir } = makeHookTree(t, `resolver-ev-${label}`);
+      const resolver = path.join(configDir, 'hooks', RESOLVER_HOOK);
+      const emptyBin = createTempDir('gsd3662-emptybin');
+      t.after(() => cleanup(emptyBin));
+      return runHook(resolver, [FOREIGN_NODE, path.join(configDir, 'hooks', 'gsd-secret-read-guard.js')], {
+        interpreter: 'bash',
+        cwd: home,
+        input,
+        env: {
+          ...process.env,
+          HOME: home,
+          PATH: `${emptyBin}:/usr/bin:/bin`,
+          GSD_NODE_RUNNER_NO_FALLBACKS: '1',
+        },
+        timeoutMs: RUN_TIMEOUT_MS,
+      });
+    }
+
+    test('no node on PreToolUse exits 2 with a named diagnostic (guard fails closed)', (t) => {
+      if (skipOnWin32(t, 'POSIX sh execution lane')) return;
+      const result = runResolverWithoutNode(t, 'pre', JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Read' }));
+      assert.equal(result.exitCode, 2, `stderr: ${result.stderr}`);
+      assert.match(result.stderr, /gsd-node-runner: no usable node found/);
+      assert.ok(result.stderr.includes(FOREIGN_NODE), 'diagnostic does not name the candidate it tried');
+    });
+
+    test('no node on Stop exits 1, never 2 (a stop must not loop)', (t) => {
+      if (skipOnWin32(t, 'POSIX sh execution lane')) return;
+      const result = runResolverWithoutNode(t, 'stop', JSON.stringify({ hook_event_name: 'Stop' }));
+      assert.equal(result.exitCode, 1, `stderr: ${result.stderr}`);
+      assert.match(result.stderr, /gsd-node-runner: no usable node found/);
+    });
+
+    test('no node with an unreadable event exits 1', (t) => {
+      if (skipOnWin32(t, 'POSIX sh execution lane')) return;
+      const result = runResolverWithoutNode(t, 'none', '');
+      assert.equal(result.exitCode, 1, `stderr: ${result.stderr}`);
+    });
+
+    test('a resolved node still receives the hook stdin untouched', (t) => {
+      if (skipOnWin32(t, 'POSIX sh execution lane')) return;
+      const { home, configDir } = makeHookTree(t, 'resolver-stdin');
+      const resolver = path.join(configDir, 'hooks', RESOLVER_HOOK);
+      const echoHook = path.join(configDir, 'hooks', 'gsd-echo-stdin.js');
+      fs.writeFileSync(echoHook, 'process.stdin.pipe(process.stdout);\n');
+      const payload = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Read' });
+      const result = runHook(resolver, [process.execPath, echoHook], {
+        interpreter: 'bash',
+        cwd: home,
+        input: payload,
+        env: { ...process.env, HOME: home, GSD_NODE_RUNNER_NO_FALLBACKS: '1' },
+        timeoutMs: RUN_TIMEOUT_MS,
+      });
+      assert.equal(result.exitCode, 0, `stderr: ${result.stderr}`);
+      assert.equal(result.stdout, payload);
+    });
   });
 
   describe('unchanged surfaces (criterion 5)', () => {

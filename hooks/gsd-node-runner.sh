@@ -21,8 +21,9 @@
 #
 # No bare `node` lookup is ever depended on: a candidate is used only after
 # an explicit executable check, and when nothing resolves this script fails
-# visibly (stderr diagnostic + exit 127) rather than emitting a half-resolved
-# invocation.
+# visibly (stderr diagnostic naming every candidate tried; exit 2 on
+# PreToolUse, exit 1 on any other event — see the failure branch) rather than
+# emitting a half-resolved invocation.
 #
 # The candidate list below is a SUPERSET of the inline chain token emitted by
 # buildNodeRunnerChainToken (src/runtime-hooks-surface.cts, #3662) — keep the
@@ -70,8 +71,23 @@ check "$preferred" || {
 }
 
 if [ -z "$found" ]; then
-  echo "gsd-node-runner: no usable node found (preferred: ${preferred:-<none>})" >&2
-  exit 127
+  tried=${preferred:-<none>}
+  if [ "${GSD_NODE_RUNNER_NO_FALLBACKS:-0}" != "1" ]; then
+    tried="$tried, command -v node, \$HOME/.local/share/mise/shims/node, \$HOME/.volta/bin/node, /opt/homebrew/bin/node, /usr/local/bin/node, /usr/bin/node"
+  fi
+  echo "gsd-node-runner: no usable node found for ${script:-<no script>} (tried: $tried)" >&2
+  # [gsd-local] Claude Code blocks only on exit 2, and on Stop/SubagentStop a
+  # block means "keep going" — a missing node there would loop every stop.
+  # So exit 2 only on PreToolUse (the guard fails CLOSED), 1 everywhere else.
+  # stdin is read on this failure path only: a resolved node gets it untouched.
+  event=''
+  if [ ! -t 0 ]; then
+    event=$(tr -d '\n' | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p')
+  fi
+  if [ "$event" = "PreToolUse" ]; then
+    exit 2
+  fi
+  exit 1
 fi
 
 exec "$found" "$script" "$@"
