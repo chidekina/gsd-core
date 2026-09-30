@@ -86,12 +86,13 @@ if [ -z "$found" ]; then
   # stdin is read on this failure path only: a resolved node gets it untouched.
   # The FIRST hook_event_name key wins: Claude Code sends it before tool_input,
   # and a tool input carrying the same key must not decide the exit code.
-  # Only Claude's PreToolUse is recognized (Gemini's BeforeTool etc. exit 1).
+  # Pre-tool events recognized: Claude's PreToolUse and Gemini's BeforeTool.
+  # Cursor's before* events have other semantics and exit 1.
   event=''
   if [ ! -t 0 ]; then
     event=$(tr -d '\r\n' | grep -o '"hook_event_name"[[:space:]]*:[[:space:]]*"[A-Za-z]*"' | head -n 1 | sed 's/.*"\([A-Za-z]*\)"$/\1/')
   fi
-  if [ "$event" = "PreToolUse" ]; then
+  if [ "$event" = "PreToolUse" ] || [ "$event" = "BeforeTool" ]; then
     exit 2
   fi
   exit 1

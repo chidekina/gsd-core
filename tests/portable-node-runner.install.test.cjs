@@ -476,6 +476,14 @@ describe('#3662 runtime-resolving managed hook runners', () => {
       assert.equal(runResolverWithoutNode(t, 'pretty-stop', stop, 'sh').exitCode, 1);
     });
 
+    // PR #1 review finding 7 (operator 2026-09-30): Gemini's pre-tool event is
+    // BeforeTool; a portable guard there must fail closed too.
+    test('no node on Gemini BeforeTool exits 2', (t) => {
+      if (skipOnWin32(t, 'POSIX sh execution lane')) return;
+      const result = runResolverWithoutNode(t, 'gemini', JSON.stringify({ hook_event_name: 'BeforeTool' }), 'sh');
+      assert.equal(result.exitCode, 2, `stderr: ${result.stderr}`);
+    });
+
     test('no node on Stop exits 1, never 2 (a stop must not loop)', (t) => {
       if (skipOnWin32(t, 'POSIX sh execution lane')) return;
       const result = runResolverWithoutNode(t, 'stop', JSON.stringify({ hook_event_name: 'Stop' }));
