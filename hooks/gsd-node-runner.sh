@@ -73,16 +73,23 @@ check "$preferred" || {
 if [ -z "$found" ]; then
   tried=${preferred:-<none>}
   if [ "${GSD_NODE_RUNNER_NO_FALLBACKS:-0}" != "1" ]; then
-    tried="$tried, command -v node, \$HOME/.local/share/mise/shims/node, \$HOME/.volta/bin/node, /opt/homebrew/bin/node, /usr/local/bin/node, /usr/bin/node"
+    tried="$tried, command -v node, ${HOME:-}/.local/share/mise/shims/node, ${HOME:-}/.volta/bin/node, /opt/homebrew/bin/node, /usr/local/bin/node, /usr/bin/node"
   fi
-  echo "gsd-node-runner: no usable node found for ${script:-<no script>} (tried: $tried)" >&2
+  target=${script:-<no script>}
+  if [ "$target" = "-e" ]; then
+    target='an inline node script (-e)'
+  fi
+  echo "gsd-node-runner: no usable node found for $target (tried: $tried)" >&2
   # [gsd-local] Claude Code blocks only on exit 2, and on Stop/SubagentStop a
   # block means "keep going" — a missing node there would loop every stop.
   # So exit 2 only on PreToolUse (the guard fails CLOSED), 1 everywhere else.
   # stdin is read on this failure path only: a resolved node gets it untouched.
+  # The FIRST hook_event_name key wins: Claude Code sends it before tool_input,
+  # and a tool input carrying the same key must not decide the exit code.
+  # Only Claude's PreToolUse is recognized (Gemini's BeforeTool etc. exit 1).
   event=''
   if [ ! -t 0 ]; then
-    event=$(tr -d '\n' | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p')
+    event=$(tr -d '\r\n' | grep -o '"hook_event_name"[[:space:]]*:[[:space:]]*"[A-Za-z]*"' | head -n 1 | sed 's/.*"\([A-Za-z]*\)"$/\1/')
   fi
   if [ "$event" = "PreToolUse" ]; then
     exit 2
