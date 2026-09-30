@@ -1000,15 +1000,20 @@ Since v1.3.1, the installer pre-populates `~/.claude/settings.json` (or
 {
   "permissions": {
     "allow": [
-      "Bash(npx gsd-core *)",
-      "Read(.planning/*)",
-      "Edit(.planning/*)",
+      "Bash(gsd-sdk *)",
+      "Read(.planning/**)",
+      "Edit(.planning/**)",
       "Read(STATE.md)",
       "Edit(STATE.md)"
     ]
   }
 }
 ```
+
+On this fork, `gsd-sdk` (the effect wrapper) replaces `npx gsd-core`, which
+resolves the package from the registry and bypasses the wrapper, and the
+recursive `.planning/**` replaces `.planning/*`, which matches one level only.
+The installer retires the older forms from an existing `settings.json`.
 
 These entries eliminate first-run approval prompts for GSD's own tool calls. The
 merge is non-destructive — your existing permissions are preserved and GSD entries

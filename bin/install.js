@@ -198,10 +198,14 @@ function isCodexHooksFeatureKey(key) {
 // The reference/default runtime (ADR-1239 reference host). Single-sourced here
 // instead of scattered literal 'claude' defaults/rosters (#2086).
 const DEFAULT_RUNTIME = 'claude';
+// [gsd-local] gsd-sdk (the effect wrapper) replaces `npx gsd-core`, which
+// resolves from the registry and bypasses it; `.planning/**` replaces the
+// one-level `.planning/*`, which never matched .planning/phases/<dir>/ files.
+// The replaced forms are retired through GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS.
 const GSD_CLAUDE_ALLOW_PERMISSIONS = Object.freeze([
-  'Bash(npx gsd-core *)',
-  'Read(.planning/*)',
-  'Edit(.planning/*)',
+  'Bash(gsd-sdk *)',
+  'Read(.planning/**)',
+  'Edit(.planning/**)',
   'Read(STATE.md)',
   'Edit(STATE.md)',
 ]);
@@ -235,6 +239,10 @@ const GSD_CLAUDE_LEGACY_DENY_PERMISSIONS = Object.freeze([
 const GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS = Object.freeze([
   'Write(.planning/*)',
   'Write(STATE.md)',
+  // [gsd-local] pre-fork forms, replaced in GSD_CLAUDE_ALLOW_PERMISSIONS
+  'Bash(npx gsd-core *)',
+  'Read(.planning/*)',
+  'Edit(.planning/*)',
 ]);
 
 /**
