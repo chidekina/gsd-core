@@ -2,7 +2,8 @@
 # gsd-hook-version: {{GSD_VERSION}}
 # gsd-node-runner.sh — GSD portable node resolver (#3662).
 #
-# Managed JS hook commands under --portable-hooks route through this script:
+# Managed JS hook commands of a global --portable-hooks install route through
+# this script:
 #
 #   bash "<hooks>/gsd-node-runner.sh" "<baked-node-path>" "<script.js>" [args...]
 #
@@ -91,7 +92,7 @@ if [ -z "$found" ]; then
   echo "gsd-node-runner: no usable node found for $target (tried: $tried)" >&2
   # [gsd-local] Claude Code blocks only on exit 2, and on Stop/SubagentStop a
   # block means "keep going" — a missing node there would loop every stop.
-  # So exit 2 only on PreToolUse (the guard fails CLOSED), 1 everywhere else.
+  # So exit 2 only on pre-tool events (the guard fails CLOSED), 1 everywhere else.
   # stdin is read on this failure path only: a resolved node gets it untouched.
   # The FIRST hook_event_name key wins: Claude Code sends it before tool_input,
   # and a tool input carrying the same key must not decide the exit code.

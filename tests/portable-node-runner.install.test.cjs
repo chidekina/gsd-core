@@ -419,8 +419,9 @@ describe('#3662 runtime-resolving managed hook runners', () => {
     // depends on the event: on PreToolUse it denies the tool (a guard with no
     // node fails CLOSED), on Stop/SubagentStop it forces the model to keep
     // going (a missing node would loop every stop). So the no-node exit code
-    // is chosen from the hook_event_name on stdin: 2 for PreToolUse, 1 for
-    // everything else (visible, non-blocking).
+    // is chosen from the hook_event_name on stdin: 2 for pre-tool events
+    // (PreToolUse, Gemini BeforeTool), 1 for everything else (visible,
+    // non-blocking).
     function runResolverWithoutNode(t, label, input, interpreter = 'bash') {
       const { home, configDir } = makeHookTree(t, `resolver-ev-${label}`);
       const resolver = path.join(configDir, 'hooks', RESOLVER_HOOK);
