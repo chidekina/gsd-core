@@ -51,7 +51,7 @@ function fireHook(t, label, { command, config, withRunner = true, env = {}, hook
   if (withRunner) fs.copyFileSync(RESOLVER_SRC, path.join(hooks, 'gsd-node-runner.sh'));
   const project = path.join(home, 'proj');
   fs.mkdirSync(path.join(project, '.planning'), { recursive: true });
-  fs.writeFileSync(path.join(project, '.planning', 'config.json'), JSON.stringify(config) + '\n');
+  fs.writeFileSync(path.join(project, '.planning', 'config.json'), typeof config === 'string' ? config : JSON.stringify(config) + '\n');
   const emptyBin = createTempDir('gsd-local-graphify-emptybin-');
   t.after(() => cleanup(emptyBin));
   return runHook(path.join(hooks, 'gsd-graphify-update.sh'), [], {
@@ -168,6 +168,16 @@ describe('[gsd-local] gsd-graphify-update.sh resolves node through the runner', 
   test('with no node, a commit in an auto_update project fails visibly', (t) => {
     if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
     const r = fireHook(t, 'nonode', { command: 'git commit -m x', config: AUTO });
+    assert.strictEqual(r.exitCode, 1, `stderr: ${r.stderr}`);
+    assert.match(r.stderr, /gsd-node-runner: no usable node found/);
+  });
+
+  // PR #1 round-3 LOW: the config pre-filter must be a SUPERSET of Gate 5,
+  // including hand-edited JSON whose value sits on the next line.
+  test('a commit with auto_update split across lines still passes the pre-filter', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const split = '{"graphify":{"enabled":true,"auto_update":\r\n true}}\n';
+    const r = fireHook(t, 'nonode-split', { command: 'git commit -m x', config: split });
     assert.strictEqual(r.exitCode, 1, `stderr: ${r.stderr}`);
     assert.match(r.stderr, /gsd-node-runner: no usable node found/);
   });

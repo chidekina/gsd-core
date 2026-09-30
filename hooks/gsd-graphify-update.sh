@@ -64,7 +64,9 @@ case "$INPUT" in
   *"git commit"*|*"git merge"*|*"git pull"*|*"git rebase --continue"*|*"git cherry-pick"*|*"gsd-tools query commit"*) ;;
   *) exit 0 ;;
 esac
-grep -q '"auto_update"[[:space:]]*:[[:space:]]*true' .planning/config.json 2>/dev/null || exit 0
+# Newlines dropped first: grep is line-based and hand-edited JSON may put the
+# value on the next line; Gate 5 (JSON.parse) accepts that, so must this.
+tr -d '\r\n' < .planning/config.json 2>/dev/null | grep -q '"auto_update"[[:space:]]*:[[:space:]]*true' || exit 0
 
 TOOL_INFO=$(printf '%s' "$INPUT" | gsd_node -e '
 let d = "";
