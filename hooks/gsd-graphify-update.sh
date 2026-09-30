@@ -50,6 +50,9 @@ HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The installer stamps the install-time node here (as the JS hooks get it in
 # their command); unstamped, the literal is not an absolute path and the
 # runner falls through to its fallbacks.
+# GSD_NODE (env, optional) overrides the baked node for this script only.
+# It must be an absolute path; anything else is rejected by the runner's
+# executable check, which then falls through to its own candidates.
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
 gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 

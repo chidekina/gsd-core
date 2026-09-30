@@ -15,6 +15,9 @@
 set -uo pipefail
 
 # [gsd-local] node through the runner (hooks/gsd-node-runner.sh, one level up)
+# GSD_NODE (env, optional) overrides the baked node for this script only.
+# It must be an absolute path; anything else is rejected by the runner's
+# executable check, which then falls through to its own candidates.
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
 gsd_node() { sh "$(cd "$(dirname "$0")/.." && pwd)/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 

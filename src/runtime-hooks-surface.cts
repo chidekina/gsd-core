@@ -593,6 +593,13 @@ function resolveNodeRunner(opts?: NodeNormOpts): string | null {
  * yields an empty word and the hook fails exactly as a stale absolute path
  * does today — no bare `node` token is ever emitted or depended on.
  *
+ * [gsd-local] That failure is exit 127, which Claude Code treats as
+ * non-blocking, so a PreToolUse guard emitted with this token fails OPEN
+ * when no node resolves. The token cannot fix that: it is one word inside a
+ * substitution and has no exit code of its own. The fail-closed branch
+ * (exit 2 on pre-tool events) lives in hooks/gsd-node-runner.sh, which only
+ * `--portable-hooks` installs route through.
+ *
  * One shape for every platform: emitted hook commands execute via POSIX `sh`
  * (Claude-on-win32 runs Git Bash per #166/#580; `hookCommandNeedsPowerShellCallOperator`
  * is an unused opt-in), and the baked path is posixNormalize'd before escaping

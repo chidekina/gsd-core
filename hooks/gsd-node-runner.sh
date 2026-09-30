@@ -25,6 +25,15 @@
 # PreToolUse, exit 1 on any other event — see the failure branch) rather than
 # emitting a half-resolved invocation.
 #
+# [gsd-local] Scope of that guarantee: it covers only the commands that call
+# THIS script, which are the managed JS hooks of a global --portable-hooks
+# install and the graphify .sh scripts. Every other install emits the inline
+# chain token (buildNodeRunnerChainToken) instead. That token is one word
+# inside a command substitution and cannot set an exit code, so with no node
+# it expands to "" and the hook exits 127: non-blocking, and a PreToolUse
+# guard fails OPEN. On this fork the live install MUST pass --portable-hooks
+# (ADR-0135, decision b).
+#
 # The candidate list below is a SUPERSET of the inline chain token emitted by
 # buildNodeRunnerChainToken (src/runtime-hooks-surface.cts, #3662) — keep the
 # two lists consistent.
