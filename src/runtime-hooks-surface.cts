@@ -593,6 +593,15 @@ function resolveNodeRunner(opts?: NodeNormOpts): string | null {
  * yields an empty word and the hook fails exactly as a stale absolute path
  * does today — no bare `node` token is ever emitted or depended on.
  *
+ * [gsd-local] That failure is exit 127, which Claude Code treats as
+ * non-blocking, so a PreToolUse guard emitted with this token fails OPEN
+ * when no node resolves. The token cannot fix that: it is one word inside a
+ * substitution and has no exit code of its own. The fail-closed branch
+ * (exit 2 on pre-tool events) lives in hooks/gsd-node-runner.sh, which only
+ * a GLOBAL `--portable-hooks` install routes its JS hooks through (a
+ * `--local` install ignores the flag and emits this token); the graphify
+ * .sh scripts call the runner on every install.
+ *
  * One shape for every platform: emitted hook commands execute via POSIX `sh`
  * (Claude-on-win32 runs Git Bash per #166/#580; `hookCommandNeedsPowerShellCallOperator`
  * is an unused opt-in), and the baked path is posixNormalize'd before escaping
@@ -2438,6 +2447,33 @@ function writeCopilotHookConfig(targetDir: string): string {
 //   localShellCmd             - (hookFile: string) => string|null
 // ---------------------------------------------------------------------------
 
+/**
+ * [gsd-local] true only when ~/.gsd/defaults.json (the user-level defaults
+ * config.cjs already layers under every project) sets graphify.enabled=true.
+ * Missing or malformed file → false: graphify stays opt-in.
+ */
+function userDefaultsEnableGraphify(): boolean {
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), '.gsd', 'defaults.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { graphify?: { enabled?: unknown } };
+    return parsed?.graphify?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * [gsd-local] the managed graphify hook by exact script basename — the same
+ * token-boundary rule isManagedHookCommand uses — so a user hook whose path
+ * merely contains the name (`my-gsd-graphify-update-wrapper.sh`) is never
+ * treated as ours. referencesHook is a substring match and too loose here.
+ */
+function isManagedGraphifyHook(h: HookEntry): boolean {
+  const command = (h as { command?: unknown })?.command;
+  if (typeof command !== 'string') return false;
+  return /(^|[\\/\s"'`])gsd-graphify-update\.sh(?=$|[\s"'`])/.test(shellCmdProjection.posixNormalize(command));
+}
+
 interface ApplySettingsJsonHooksOpts {
   runtime: string;
   isGlobal: boolean;
@@ -2881,7 +2917,27 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
       entry.hooks && entry.hooks.some((h: HookEntry) => referencesHook(h as Record<string, unknown>, 'gsd-graphify-update'))
     );
     const graphifyUpdateFile = path.join(targetDir, 'hooks', 'gsd-graphify-update.sh');
-    if (!hasGraphifyUpdateHook && fs.existsSync(graphifyUpdateFile) && graphifyUpdateCommand) {
+    // [gsd-local] hasGraphifyUpdateHook above stays literal (docs-hooks-table-
+    // parity parses it) but is a name-substring match: a user hook named like
+    // my-gsd-graphify-update-wrapper.sh would count as ours and block the
+    // registration silently. The decision uses the exact-basename check.
+    const hasManagedGraphifyHook = hasGraphifyUpdateHook && settings.hooks[postToolEvent].some((entry: HookGroup) =>
+      entry.hooks && entry.hooks.some((h: HookEntry) => isManagedGraphifyHook(h))
+    );
+    // [gsd-local] register only when the user-level defaults opt in; an
+    // earlier registration is removed once they no longer do, so the hook is
+    // not spawned after every Bash call in projects that never enable it.
+    if (!userDefaultsEnableGraphify()) {
+      const before = JSON.stringify(settings.hooks[postToolEvent]);
+      settings.hooks[postToolEvent] = settings.hooks[postToolEvent]
+        .map((entry: HookGroup) => (entry && Array.isArray(entry.hooks)
+          ? { ...entry, hooks: entry.hooks.filter((h: HookEntry) => !isManagedGraphifyHook(h)) }
+          : entry))
+        .filter((entry: HookGroup) => !(entry && Array.isArray(entry.hooks) && entry.hooks.length === 0));
+      if (JSON.stringify(settings.hooks[postToolEvent]) !== before) {
+        console.log(`  ${green}✓${reset} Removed graphify auto-update hook (graphify.enabled is not set in ~/.gsd/defaults.json)`);
+      }
+    } else if (!hasManagedGraphifyHook && fs.existsSync(graphifyUpdateFile) && graphifyUpdateCommand) {
       settings.hooks[postToolEvent].push({
         matcher: 'Bash',
         hooks: [
@@ -2893,9 +2949,9 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
         ]
       });
       console.log(`  ${green}✓${reset} Configured graphify auto-update hook (opt-in via graphify.auto_update)`);
-    } else if (!hasGraphifyUpdateHook && !fs.existsSync(graphifyUpdateFile)) {
+    } else if (!hasManagedGraphifyHook && !fs.existsSync(graphifyUpdateFile)) {
       console.warn(`  ${yellow}⚠${reset}  Skipped graphify auto-update hook — gsd-graphify-update.sh not found at target`);
-    } else if (!hasGraphifyUpdateHook && !graphifyUpdateCommand) {
+    } else if (!hasManagedGraphifyHook && !graphifyUpdateCommand) {
       console.warn(`  ${yellow}⚠${reset}  Skipped graphify auto-update hook — Bash executable path unavailable (#3393)`);
     }
 
@@ -3221,7 +3277,11 @@ function buildKimiHooksTomlBlock(targetDir: string, opts: { hookOpts: BuildHookC
     { event: 'SubagentStop', command: cmd('gsd-context-monitor.js'), timeout: 10 },
   ];
 
+  // [gsd-local] same opt-in as the settings.json surface. Applied after the
+  // literal spec array, which docs-hooks-table-parity parses from source.
+  const graphifyOn = userDefaultsEnableGraphify();
   const entries = specs
+    .filter((spec) => graphifyOn || !(spec.command && isManagedGraphifyHook({ command: spec.command })))
     .map(buildKimiHookEntryToml)
     .filter((entry): entry is string => entry !== null);
   if (entries.length === 0) return null;
@@ -3543,6 +3603,7 @@ export = {
   normalizeNodePath,
   resolveNodeRunner,
   buildNodeRunnerChainToken,
+  buildBakedNodeToken,
   resolveBashRunner,
   NODE_RUNNER_RESOLVER_HOOK,
 

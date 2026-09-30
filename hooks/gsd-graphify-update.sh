@@ -29,7 +29,9 @@
 #   - Detaches hooks/lib/gsd-graphify-rebuild.sh which copies graphify-out/* to
 #     .planning/graphs/ and rewrites the status file with status="ok"|"failed"
 #
-# Returns 0 in all cases. Never blocks the user-facing tool call.
+# Returns 0 except when node cannot be resolved at Gate 1: then it exits 1
+# (PostToolUse, non-blocking) with the node runner's named diagnostic.
+# [gsd-local] Never exits 2, so it never blocks the user-facing tool call.
 
 set -uo pipefail
 
@@ -40,11 +42,36 @@ set -uo pipefail
 [ -f .planning/config.json ] || exit 0
 [ -z "${CI:-}" ] || exit 0
 
+# [gsd-local] every node call goes through the node runner, never a bare
+# `node`: under a minimal hook PATH a bare node fails, and the old
+# `2>/dev/null || fallback` shapes turned that into a silent exit 0. The
+# runner names what it tried and exits 1 on PostToolUse.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The installer stamps the install-time node here (as the JS hooks get it in
+# their command); unstamped, the literal is not an absolute path and the
+# runner falls through to its fallbacks.
+# GSD_NODE (env, optional) overrides the baked node for this script only.
+# It must be an absolute path; anything else is rejected by the runner's
+# executable check, which then falls through to its own candidates.
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+
 # Gate 1 — tool_name == Bash; extract command
 INPUT=$(cat 2>/dev/null || true)
 [ -n "$INPUT" ] || exit 0
 
-TOOL_INFO=$(printf '%s' "$INPUT" | node -e '
+# [gsd-local] shell pre-filters, SUPERSETS of Gates 2 and 5, so the common
+# path spawns no node: a missing node is reported only when a HEAD-advancing
+# command runs in a project that asks for auto_update.
+case "$INPUT" in
+  *"git commit"*|*"git merge"*|*"git pull"*|*"git rebase --continue"*|*"git cherry-pick"*|*"gsd-tools query commit"*) ;;
+  *) exit 0 ;;
+esac
+# Newlines dropped first: grep is line-based and hand-edited JSON may put the
+# value on the next line; Gate 5 (JSON.parse) accepts that, so must this.
+tr -d '\r\n' < .planning/config.json 2>/dev/null | grep -q '"auto_update"[[:space:]]*:[[:space:]]*true' || exit 0
+
+TOOL_INFO=$(printf '%s' "$INPUT" | gsd_node -e '
 let d = "";
 process.stdin.on("data", c => d += c);
 process.stdin.on("end", () => {
@@ -53,7 +80,7 @@ process.stdin.on("end", () => {
     process.stdout.write((p.tool_name || "") + "\n" + (p.tool_input?.command || ""));
   } catch { process.stdout.write("\n"); }
 });
-' 2>/dev/null || printf '\n')
+') || exit 1
 TOOL_NAME=$(printf '%s\n' "$TOOL_INFO" | sed -n '1p')
 # Capture the FULL command (line 2 through EOF). Agent runtimes routinely emit
 # HEAD-advancing commits as multi-line scripts (`cd /path` then `git add` then
@@ -86,7 +113,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
 # Gate 4 — current branch == default branch (config guaranteed by Gate 0)
 DEFAULT_BRANCH=""
-DEFAULT_BRANCH=$(node -e '
+DEFAULT_BRANCH=$(gsd_node -e '
 try {
   const c = require("./.planning/config.json");
   process.stdout.write(c.git?.base_branch || "");
@@ -106,7 +133,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ] || exit 0
 
 # Gate 5 — both graphify gates true in config (file existence checked at Gate 0)
-GATES=$(node -e '
+GATES=$(gsd_node -e '
 try {
   const c = require("./.planning/config.json");
   const ok = c.graphify?.enabled === true && c.graphify?.auto_update === true;
@@ -134,12 +161,12 @@ fi
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
 STATUS_FILE=".planning/graphs/.last-build-status.json"
 TS_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
-MS_START=$(node -e 'process.stdout.write(String(Date.now()))' 2>/dev/null || echo "0")
+MS_START=$(gsd_node -e 'process.stdout.write(String(Date.now()))' 2>/dev/null || echo "0")
 
 GSD_TS="$TS_START" \
 GSD_HEAD="$HEAD_SHA" \
 GSD_STATUS_FILE="$STATUS_FILE" \
-node -e '
+gsd_node -e '
   const fs = require("node:fs");
   const status = {
     ts: process.env.GSD_TS,
@@ -152,8 +179,8 @@ node -e '
   fs.writeFileSync(process.env.GSD_STATUS_FILE, JSON.stringify(status, null, 2) + "\n");
 ' 2>/dev/null || true
 
-# Resolve rebuild helper script (sibling-relative for portability across install layouts)
-HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve rebuild helper script (sibling-relative for portability across install layouts;
+# HOOK_DIR is set next to gsd_node above)
 REBUILD_SCRIPT="$HOOK_DIR/lib/gsd-graphify-rebuild.sh"
 [ -f "$REBUILD_SCRIPT" ] || exit 0
 

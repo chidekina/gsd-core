@@ -428,22 +428,47 @@ describe('mergeClaudePermissions (#768): fresh settings object', () => {
     }
   });
 
-  test('includes Bash(npx gsd-core *) in allow', () => {
+  // [gsd-local] `npx gsd-core` resolves the package from the registry and
+  // bypasses the gsd-sdk effect wrapper; the sanctioned entry point is gsd-sdk.
+  test('allows Bash(gsd-sdk *) and not Bash(npx gsd-core *) [gsd-local]', () => {
     const settings = {};
     mergeClaudePermissions(settings);
-    assert.ok(settings.permissions.allow.includes('Bash(npx gsd-core *)'),
-      'permissions.allow must contain Bash(npx gsd-core *)');
+    assert.ok(settings.permissions.allow.includes('Bash(gsd-sdk *)'),
+      'permissions.allow must contain Bash(gsd-sdk *)');
+    assert.ok(!settings.permissions.allow.includes('Bash(npx gsd-core *)'),
+      'permissions.allow must NOT contain Bash(npx gsd-core *)');
   });
 
-  test('includes planning path entries in allow (#2278: Edit, not Write)', () => {
+  // [gsd-local] `.planning/*` matches one level only; phase artifacts live
+  // under .planning/phases/<dir>/, so the recursive form is the one that grants.
+  test('includes recursive planning path entries in allow (#2278: Edit, not Write) [gsd-local]', () => {
     const settings = {};
     mergeClaudePermissions(settings);
-    assert.ok(settings.permissions.allow.includes('Read(.planning/*)'),
-      'permissions.allow must contain Read(.planning/*)');
-    assert.ok(settings.permissions.allow.includes('Edit(.planning/*)'),
-      'permissions.allow must contain Edit(.planning/*)');
+    assert.ok(settings.permissions.allow.includes('Read(.planning/**)'),
+      'permissions.allow must contain Read(.planning/**)');
+    assert.ok(settings.permissions.allow.includes('Edit(.planning/**)'),
+      'permissions.allow must contain Edit(.planning/**)');
+    assert.ok(!settings.permissions.allow.includes('Read(.planning/*)'),
+      'permissions.allow must NOT contain the one-level Read(.planning/*) form');
     assert.ok(!settings.permissions.allow.includes('Write(.planning/*)'),
       'permissions.allow must NOT contain the unmatched Write(.planning/*) form (#2278)');
+  });
+
+  test('retires the pre-fork entries on an existing install [gsd-local]', () => {
+    const settings = {
+      permissions: {
+        allow: ['Bash(git *)', 'Bash(npx gsd-core *)', 'Read(.planning/*)', 'Edit(.planning/*)'],
+      },
+    };
+    mergeClaudePermissions(settings);
+    for (const retired of ['Bash(npx gsd-core *)', 'Read(.planning/*)', 'Edit(.planning/*)']) {
+      assert.ok(!settings.permissions.allow.includes(retired), `"${retired}" must be retired`);
+    }
+    // the same call must also carry the replacements, or an empty allow passes
+    for (const current of ['Bash(gsd-sdk *)', 'Read(.planning/**)', 'Edit(.planning/**)']) {
+      assert.ok(settings.permissions.allow.includes(current), `"${current}" must be added`);
+    }
+    assert.ok(settings.permissions.allow.includes('Bash(git *)'), 'user entry must survive');
   });
 
   test('includes STATE.md entries in allow (#2278: Edit, not Write)', () => {
@@ -483,7 +508,7 @@ describe('mergeClaudePermissions (#768): non-destructive merge', () => {
     assert.ok(settings.permissions.deny.includes('WebSearch'),
       'existing deny entries must be preserved');
     // GSD allow entries must be added; the retired deny rules must not be
-    assert.ok(settings.permissions.allow.includes('Bash(npx gsd-core *)'),
+    assert.ok(settings.permissions.allow.includes('Bash(gsd-sdk *)'),
       'GSD allow entry must be added');
     assert.ok(!settings.permissions.deny.includes('Read(.env)'),
       'the retired Read(.env) deny rule must not be added (#4221)');
@@ -524,7 +549,7 @@ describe('mergeClaudePermissions (#768): non-destructive merge', () => {
     mergeClaudePermissions(settings);
     assert.ok(Array.isArray(settings.permissions.allow));
     assert.ok(Array.isArray(settings.permissions.deny));
-    assert.ok(settings.permissions.allow.includes('Bash(npx gsd-core *)'));
+    assert.ok(settings.permissions.allow.includes('Bash(gsd-sdk *)'));
   });
 
   test('handles settings that are not plain objects (returns unchanged)', () => {
@@ -547,16 +572,16 @@ describe('mergeClaudePermissions (#2278): legacy Write(...) → Edit(...) migrat
       'GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS must be an array');
     assert.deepStrictEqual(
       [...GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS].sort(),
-      ['Write(.planning/*)', 'Write(STATE.md)'].sort(),
-      'GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS must contain exactly the retired Write(...) forms'
+      ['Write(.planning/*)', 'Write(STATE.md)', 'Bash(npx gsd-core *)', 'Read(.planning/*)', 'Edit(.planning/*)'].sort(),
+      'GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS must contain exactly the retired Write(...) forms and the [gsd-local] pre-fork forms'
     );
   });
 
   test('fresh/empty settings: allow ends with Edit(...) forms, never Write(...)', () => {
     const settings = {};
     mergeClaudePermissions(settings);
-    assert.ok(settings.permissions.allow.includes('Edit(.planning/*)'),
-      'fresh merge must add Edit(.planning/*)');
+    assert.ok(settings.permissions.allow.includes('Edit(.planning/**)'),
+      'fresh merge must add Edit(.planning/**)');
     assert.ok(settings.permissions.allow.includes('Edit(STATE.md)'),
       'fresh merge must add Edit(STATE.md)');
     assert.ok(!settings.permissions.allow.includes('Write(.planning/*)'),
@@ -581,8 +606,8 @@ describe('mergeClaudePermissions (#2278): legacy Write(...) → Edit(...) migrat
       'legacy Write(STATE.md) must be removed by merge');
 
     // Replaced by the working Edit(...) forms.
-    assert.ok(settings.permissions.allow.includes('Edit(.planning/*)'),
-      'Edit(.planning/*) must be present after migration');
+    assert.ok(settings.permissions.allow.includes('Edit(.planning/**)'),
+      'Edit(.planning/**) must be present after migration');
     assert.ok(settings.permissions.allow.includes('Edit(STATE.md)'),
       'Edit(STATE.md) must be present after migration');
 
@@ -596,7 +621,7 @@ describe('mergeClaudePermissions (#2278): legacy Write(...) → Edit(...) migrat
   test('mixed state: settings.allow containing BOTH legacy and current forms simultaneously collapses to exactly one Edit(...) each', () => {
     const settings = {
       permissions: {
-        allow: ['Write(.planning/*)', 'Edit(.planning/*)', 'Write(STATE.md)', 'Edit(STATE.md)', 'Bash(git *)'],
+        allow: ['Write(.planning/*)', 'Edit(.planning/**)', 'Write(STATE.md)', 'Edit(STATE.md)', 'Bash(git *)'],
         deny: [],
       },
     };
@@ -604,15 +629,15 @@ describe('mergeClaudePermissions (#2278): legacy Write(...) → Edit(...) migrat
 
     // Legacy forms must be gone.
     assert.ok(!settings.permissions.allow.includes('Write(.planning/*)'),
-      'legacy Write(.planning/*) must be removed even when Edit(.planning/*) was already present');
+      'legacy Write(.planning/*) must be removed even when Edit(.planning/**) was already present');
     assert.ok(!settings.permissions.allow.includes('Write(STATE.md)'),
       'legacy Write(STATE.md) must be removed even when Edit(STATE.md) was already present');
 
     // Current forms must appear exactly once (no duplicate from the pre-existing entry).
     assert.strictEqual(
-      settings.permissions.allow.filter((e) => e === 'Edit(.planning/*)').length,
+      settings.permissions.allow.filter((e) => e === 'Edit(.planning/**)').length,
       1,
-      'Edit(.planning/*) must appear exactly once, not duplicated'
+      'Edit(.planning/**) must appear exactly once, not duplicated'
     );
     assert.strictEqual(
       settings.permissions.allow.filter((e) => e === 'Edit(STATE.md)').length,
@@ -768,10 +793,10 @@ describe('mergeClaudePermissions (#768): end-to-end install writes permissions t
     assert.strictEqual(settings.permissions.deny, undefined,
       'a fresh install must not write permissions.deny at all (#4221)');
 
-    assert.ok(settings.permissions.allow.includes('Bash(npx gsd-core *)'),
-      'settings.json permissions.allow must include Bash(npx gsd-core *)');
-    assert.ok(settings.permissions.allow.includes('Read(.planning/*)'),
-      'settings.json permissions.allow must include Read(.planning/*)');
+    assert.ok(settings.permissions.allow.includes('Bash(gsd-sdk *)'),
+      'settings.json permissions.allow must include Bash(gsd-sdk *)');
+    assert.ok(settings.permissions.allow.includes('Read(.planning/**)'),
+      'settings.json permissions.allow must include Read(.planning/**)');
   });
 
   test('non-claude runtime (antigravity) does NOT write GSD allow/deny permissions to settings.json', (t) => {
@@ -791,8 +816,8 @@ describe('mergeClaudePermissions (#768): end-to-end install writes permissions t
     if (fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       const allow = settings.permissions?.allow ?? [];
-      assert.ok(!allow.includes('Bash(npx gsd-core *)'),
-        'Antigravity settings.json must NOT include Bash(npx gsd-core *) in permissions.allow');
+      assert.ok(!allow.includes('Bash(gsd-sdk *)'),
+        'Antigravity settings.json must NOT include Bash(gsd-sdk *) in permissions.allow');
     }
   });
 
@@ -843,7 +868,7 @@ describe('mergeClaudePermissions (#768): end-to-end install writes permissions t
     // Verify permissions were written
     const settingsPath = path.join(root, 'settings.json');
     const afterInstall = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    assert.ok((afterInstall.permissions?.allow ?? []).includes('Bash(npx gsd-core *)'),
+    assert.ok((afterInstall.permissions?.allow ?? []).includes('Bash(gsd-sdk *)'),
       'permissions.allow must contain GSD entry after install');
 
     // Now add a user permission to make sure we don't nuke it, and simulate
@@ -864,10 +889,10 @@ describe('mergeClaudePermissions (#768): end-to-end install writes permissions t
     const deny = afterUninstall.permissions?.deny ?? [];
 
     // GSD entries must be removed
-    assert.ok(!allow.includes('Bash(npx gsd-core *)'),
+    assert.ok(!allow.includes('Bash(gsd-sdk *)'),
       'GSD Bash allow entry must be removed by uninstall');
-    assert.ok(!allow.includes('Read(.planning/*)'),
-      'GSD Read(.planning/*) allow entry must be removed by uninstall');
+    assert.ok(!allow.includes('Read(.planning/**)'),
+      'GSD Read(.planning/**) allow entry must be removed by uninstall');
     for (const entry of GSD_CLAUDE_LEGACY_DENY_PERMISSIONS) {
       assert.ok(!deny.includes(entry),
         `retired GSD deny entry "${entry}" must be removed by uninstall (#4221)`);

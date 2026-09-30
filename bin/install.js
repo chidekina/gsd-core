@@ -198,10 +198,14 @@ function isCodexHooksFeatureKey(key) {
 // The reference/default runtime (ADR-1239 reference host). Single-sourced here
 // instead of scattered literal 'claude' defaults/rosters (#2086).
 const DEFAULT_RUNTIME = 'claude';
+// [gsd-local] gsd-sdk (the effect wrapper) replaces `npx gsd-core`, which
+// resolves from the registry and bypasses it; `.planning/**` replaces the
+// one-level `.planning/*`, which never matched .planning/phases/<dir>/ files.
+// The replaced forms are retired through GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS.
 const GSD_CLAUDE_ALLOW_PERMISSIONS = Object.freeze([
-  'Bash(npx gsd-core *)',
-  'Read(.planning/*)',
-  'Edit(.planning/*)',
+  'Bash(gsd-sdk *)',
+  'Read(.planning/**)',
+  'Edit(.planning/**)',
   'Read(STATE.md)',
   'Edit(STATE.md)',
 ]);
@@ -235,6 +239,10 @@ const GSD_CLAUDE_LEGACY_DENY_PERMISSIONS = Object.freeze([
 const GSD_CLAUDE_LEGACY_ALLOW_PERMISSIONS = Object.freeze([
   'Write(.planning/*)',
   'Write(STATE.md)',
+  // [gsd-local] pre-fork forms, replaced in GSD_CLAUDE_ALLOW_PERMISSIONS
+  'Bash(npx gsd-core *)',
+  'Read(.planning/*)',
+  'Edit(.planning/*)',
 ]);
 
 /**
@@ -1307,6 +1315,15 @@ const resolveNodeRunner = hooksSurface.resolveNodeRunner;
 // absolute node path tried FIRST, then `command -v node`, then well-known
 // layouts, resolved by the shell at hook-fire time instead of bake time.
 const buildNodeRunnerChainToken = hooksSurface.buildNodeRunnerChainToken;
+// [gsd-local] stamp the install-time node (shell-quoted, the same token the
+// portable resolver gets as its first argument) into .sh hooks that call
+// node through gsd-node-runner.sh. Unstamped, {{GSD_NODE_TOKEN}} is a
+// non-absolute literal and the runner falls through to its fallbacks.
+function stampGsdNodeToken(content) {
+  if (!content.includes('{{GSD_NODE_TOKEN}}')) return content;
+  const token = hooksSurface.buildBakedNodeToken();
+  return token ? content.replace(/\{\{GSD_NODE_TOKEN\}\}/g, () => token) : content;
+}
 const resolveBashRunner = hooksSurface.resolveBashRunner;
 // referencesHook: pure predicate over hook entry objects, shared between
 // install() and finishInstall() (ADR-857 phase 5f-1b).
@@ -10718,6 +10735,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
       } else if (entry.endsWith('.sh')) {
         let content = fs.readFileSync(s, 'utf8');
         content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+        content = stampGsdNodeToken(content);
         fs.writeFileSync(d, content);
         try { fs.chmodSync(d, 0o755); } catch (_) { /* Windows */ }
       } else {
@@ -12050,6 +12068,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             if (entry.endsWith('.sh')) {
               let content = fs.readFileSync(srcFile, 'utf8');
               content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+              content = stampGsdNodeToken(content);
               fs.writeFileSync(destFile, content);
               try { fs.chmodSync(destFile, 0o755); } catch (e) { /* Windows doesn't support chmod */ }
             } else {
@@ -12071,6 +12090,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             if (subEntry.endsWith('.sh')) {
               let content = fs.readFileSync(subSrcFile, 'utf8');
               content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+              content = stampGsdNodeToken(content);
               fs.writeFileSync(subDestFile, content);
               try { fs.chmodSync(subDestFile, 0o755); } catch (e) { /* Windows */ }
             } else {
@@ -12741,6 +12761,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
           // extended later (e.g. to ship gsd-graphify-update.sh for Codex).
           let content = fs.readFileSync(srcFile, 'utf8');
           content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+          content = stampGsdNodeToken(content);
           fs.writeFileSync(destFile, content);
           try { fs.chmodSync(destFile, 0o755); } catch (e) { /* Windows */ }
         } else {
@@ -12783,7 +12804,8 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             .replace(/'\.claude'/g, configDirReplacement)
             .replace(/\/\.claude\//g, `/${getDirName(runtime)}/`)
             .replace(/\.claude\//g, `${getDirName(runtime)}/`)
-            .replace(/\{\{GSD_VERSION\}\}/g, pkg.version),
+            .replace(/\{\{GSD_VERSION\}\}/g, pkg.version)
+            .replace(/\{\{GSD_NODE_TOKEN\}\}/g, (m) => stampGsdNodeToken(m)),
         });
       }
       console.log(`  ${green}✓${reset} Installed hooks (Codex)`);
