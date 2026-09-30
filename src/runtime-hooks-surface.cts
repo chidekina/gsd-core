@@ -598,7 +598,9 @@ function resolveNodeRunner(opts?: NodeNormOpts): string | null {
  * when no node resolves. The token cannot fix that: it is one word inside a
  * substitution and has no exit code of its own. The fail-closed branch
  * (exit 2 on pre-tool events) lives in hooks/gsd-node-runner.sh, which only
- * `--portable-hooks` installs route through.
+ * a GLOBAL `--portable-hooks` install routes its JS hooks through (a
+ * `--local` install ignores the flag and emits this token); the graphify
+ * .sh scripts call the runner on every install.
  *
  * One shape for every platform: emitted hook commands execute via POSIX `sh`
  * (Claude-on-win32 runs Git Bash per #166/#580; `hookCommandNeedsPowerShellCallOperator`

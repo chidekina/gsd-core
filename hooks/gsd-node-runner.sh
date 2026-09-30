@@ -22,7 +22,7 @@
 # No bare `node` lookup is ever depended on: a candidate is used only after
 # an explicit executable check, and when nothing resolves this script fails
 # visibly (stderr diagnostic naming every candidate tried; exit 2 on
-# PreToolUse, exit 1 on any other event — see the failure branch) rather than
+# PreToolUse and Gemini BeforeTool, exit 1 on any other event — see the failure branch) rather than
 # emitting a half-resolved invocation.
 #
 # [gsd-local] Scope of that guarantee: it covers only the commands that call
@@ -32,7 +32,7 @@
 # inside a command substitution and cannot set an exit code, so with no node
 # it expands to "" and the hook exits 127: non-blocking, and a PreToolUse
 # guard fails OPEN. On this fork the live install MUST pass --portable-hooks
-# (ADR-0135, decision b).
+# (ADR-0135, Decisão 4 (b), in the operator's projetos repo).
 #
 # The candidate list below is a SUPERSET of the inline chain token emitted by
 # buildNodeRunnerChainToken (src/runtime-hooks-surface.cts, #3662) — keep the
