@@ -29,7 +29,9 @@
 #   - Detaches hooks/lib/gsd-graphify-rebuild.sh which copies graphify-out/* to
 #     .planning/graphs/ and rewrites the status file with status="ok"|"failed"
 #
-# Returns 0 in all cases. Never blocks the user-facing tool call.
+# Returns 0 except when node cannot be resolved at Gate 1: then it exits 1
+# (PostToolUse, non-blocking) with the node runner's named diagnostic.
+# [gsd-local] Never exits 2, so it never blocks the user-facing tool call.
 
 set -uo pipefail
 
@@ -60,7 +62,7 @@ process.stdin.on("end", () => {
     process.stdout.write((p.tool_name || "") + "\n" + (p.tool_input?.command || ""));
   } catch { process.stdout.write("\n"); }
 });
-') || exit $?
+') || exit 1
 TOOL_NAME=$(printf '%s\n' "$TOOL_INFO" | sed -n '1p')
 # Capture the FULL command (line 2 through EOF). Agent runtimes routinely emit
 # HEAD-advancing commits as multi-line scripts (`cd /path` then `git add` then

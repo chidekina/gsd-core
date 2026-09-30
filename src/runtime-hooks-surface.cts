@@ -2453,6 +2453,18 @@ function userDefaultsEnableGraphify(): boolean {
   }
 }
 
+/**
+ * [gsd-local] the managed graphify hook by exact script basename — the same
+ * token-boundary rule isManagedHookCommand uses — so a user hook whose path
+ * merely contains the name (`my-gsd-graphify-update-wrapper.sh`) is never
+ * treated as ours. referencesHook is a substring match and too loose here.
+ */
+function isManagedGraphifyHook(h: HookEntry): boolean {
+  const command = (h as { command?: unknown })?.command;
+  if (typeof command !== 'string') return false;
+  return /(^|[\\/\s"'`])gsd-graphify-update\.sh(?=$|[\s"'`])/.test(shellCmdProjection.posixNormalize(command));
+}
+
 interface ApplySettingsJsonHooksOpts {
   runtime: string;
   isGlobal: boolean;
@@ -2903,7 +2915,7 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
       const before = JSON.stringify(settings.hooks[postToolEvent]);
       settings.hooks[postToolEvent] = settings.hooks[postToolEvent]
         .map((entry: HookGroup) => (entry && Array.isArray(entry.hooks)
-          ? { ...entry, hooks: entry.hooks.filter((h: HookEntry) => !referencesHook(h as Record<string, unknown>, 'gsd-graphify-update')) }
+          ? { ...entry, hooks: entry.hooks.filter((h: HookEntry) => !isManagedGraphifyHook(h)) }
           : entry))
         .filter((entry: HookGroup) => !(entry && Array.isArray(entry.hooks) && entry.hooks.length === 0));
       if (JSON.stringify(settings.hooks[postToolEvent]) !== before) {
@@ -3249,7 +3261,11 @@ function buildKimiHooksTomlBlock(targetDir: string, opts: { hookOpts: BuildHookC
     { event: 'SubagentStop', command: cmd('gsd-context-monitor.js'), timeout: 10 },
   ];
 
+  // [gsd-local] same opt-in as the settings.json surface. Applied after the
+  // literal spec array, which docs-hooks-table-parity parses from source.
+  const graphifyOn = userDefaultsEnableGraphify();
   const entries = specs
+    .filter((spec) => graphifyOn || !(spec.command && isManagedGraphifyHook({ command: spec.command })))
     .map(buildKimiHookEntryToml)
     .filter((entry): entry is string => entry !== null);
   if (entries.length === 0) return null;
