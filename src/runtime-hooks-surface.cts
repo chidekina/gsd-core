@@ -2438,6 +2438,21 @@ function writeCopilotHookConfig(targetDir: string): string {
 //   localShellCmd             - (hookFile: string) => string|null
 // ---------------------------------------------------------------------------
 
+/**
+ * [gsd-local] true only when ~/.gsd/defaults.json (the user-level defaults
+ * config.cjs already layers under every project) sets graphify.enabled=true.
+ * Missing or malformed file → false: graphify stays opt-in.
+ */
+function userDefaultsEnableGraphify(): boolean {
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), '.gsd', 'defaults.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { graphify?: { enabled?: unknown } };
+    return parsed?.graphify?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 interface ApplySettingsJsonHooksOpts {
   runtime: string;
   isGlobal: boolean;
@@ -2881,7 +2896,20 @@ function applySettingsJsonHooks(settings: any, opts: ApplySettingsJsonHooksOpts)
       entry.hooks && entry.hooks.some((h: HookEntry) => referencesHook(h as Record<string, unknown>, 'gsd-graphify-update'))
     );
     const graphifyUpdateFile = path.join(targetDir, 'hooks', 'gsd-graphify-update.sh');
-    if (!hasGraphifyUpdateHook && fs.existsSync(graphifyUpdateFile) && graphifyUpdateCommand) {
+    // [gsd-local] register only when the user-level defaults opt in; an
+    // earlier registration is removed once they no longer do, so the hook is
+    // not spawned after every Bash call in projects that never enable it.
+    if (!userDefaultsEnableGraphify()) {
+      const before = JSON.stringify(settings.hooks[postToolEvent]);
+      settings.hooks[postToolEvent] = settings.hooks[postToolEvent]
+        .map((entry: HookGroup) => (entry && Array.isArray(entry.hooks)
+          ? { ...entry, hooks: entry.hooks.filter((h: HookEntry) => !referencesHook(h as Record<string, unknown>, 'gsd-graphify-update')) }
+          : entry))
+        .filter((entry: HookGroup) => !(entry && Array.isArray(entry.hooks) && entry.hooks.length === 0));
+      if (JSON.stringify(settings.hooks[postToolEvent]) !== before) {
+        console.log(`  ${green}✓${reset} Removed graphify auto-update hook (graphify.enabled is not set in ~/.gsd/defaults.json)`);
+      }
+    } else if (!hasGraphifyUpdateHook && fs.existsSync(graphifyUpdateFile) && graphifyUpdateCommand) {
       settings.hooks[postToolEvent].push({
         matcher: 'Bash',
         hooks: [

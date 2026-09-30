@@ -14,6 +14,9 @@
 
 set -uo pipefail
 
+# [gsd-local] node through the runner (hooks/gsd-node-runner.sh, one level up)
+gsd_node() { sh "$(cd "$(dirname "$0")/.." && pwd)/gsd-node-runner.sh" "${GSD_NODE:-}" "$@"; }
+
 STATUS_FILE="${1:?STATUS_FILE required}"
 LOCK_FILE="${2:?LOCK_FILE required}"
 HEAD_SHA="${3:?HEAD_SHA required}"
@@ -36,7 +39,7 @@ if [ "$EXIT_CODE" -eq 0 ] && [ -f graphify-out/graph.json ]; then
 fi
 
 # Compute duration in ms
-MS_END=$(node -e 'process.stdout.write(String(Date.now()))' 2>/dev/null || echo "$MS_START")
+MS_END=$(gsd_node -e 'process.stdout.write(String(Date.now()))' 2>/dev/null || echo "$MS_START")
 DURATION=$((MS_END - MS_START))
 
 STATUS_NAME="ok"
@@ -51,7 +54,7 @@ GSD_EXIT_CODE="$EXIT_CODE" \
 GSD_DURATION="$DURATION" \
 GSD_HEAD_SHA="$HEAD_SHA" \
 GSD_STATUS_FILE="$STATUS_FILE" \
-node -e '
+gsd_node -e '
   const fs = require("node:fs");
   const status = {
     ts: process.env.GSD_STATUS_TS,

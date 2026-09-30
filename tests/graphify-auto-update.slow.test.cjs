@@ -420,11 +420,14 @@ describe('auto-update', () => {
         config: { graphify: { enabled: true, auto_update: true } },
       });
       t.after(() => cleanupHookRepo(tmpDir));
-      // Note: do NOT prepend mock bin; rely on real PATH not having graphify
+      // Note: do NOT prepend mock bin; rely on real PATH not having graphify.
+      // [gsd-local] node's own dir stays on PATH: with /usr/bin:/bin alone this
+      // passed because the Gate 1 bare `node` failed silently, never reaching
+      // Gate 6. Node now resolves through the runner, which fails visibly.
       const r = runHook(
         tmpDir,
         { tool_name: 'Bash', tool_input: { command: 'git commit -m x' } },
-        { env: { PATH: '/usr/bin:/bin' } },
+        { env: { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` } },
       );
       assert.strictEqual(r.status, 0, 'must not break commits when graphify missing');
     });

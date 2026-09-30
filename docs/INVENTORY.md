@@ -779,7 +779,7 @@ Full listing: `hooks/`.
 | `gsd-session-state.sh` | `SessionStart` | Session-state tracking for shell-based runtimes |
 | `gsd-validate-commit.sh` | `PreToolUse` | Commit validation for conventional-commit enforcement |
 | `gsd-phase-boundary.sh` | `PostToolUse` | Phase-boundary detection for workflow transitions |
-| `gsd-graphify-update.sh` | `PostToolUse` | Auto-rebuild knowledge graph after main HEAD advances (opt-in, default off — #3347) |
+| `gsd-graphify-update.sh` | `PostToolUse` | Auto-rebuild knowledge graph after main HEAD advances (opt-in, default off — #3347; on this fork registered only when `~/.gsd/defaults.json` sets `graphify.enabled: true`) |
 | `gsd-node-runner.sh` | (helper) | Portable node resolver managed JS hook commands route through under `--portable-hooks`: install-time node path first, then `command -v node`, then well-known layouts — resolves at hook-fire time so a shared config root works in every environment (#3662) |
 
 ### Hook Library (`hooks/lib/`)
