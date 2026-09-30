@@ -12761,6 +12761,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
           // extended later (e.g. to ship gsd-graphify-update.sh for Codex).
           let content = fs.readFileSync(srcFile, 'utf8');
           content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
+          content = stampGsdNodeToken(content);
           fs.writeFileSync(destFile, content);
           try { fs.chmodSync(destFile, 0o755); } catch (e) { /* Windows */ }
         } else {
@@ -12803,7 +12804,8 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             .replace(/'\.claude'/g, configDirReplacement)
             .replace(/\/\.claude\//g, `/${getDirName(runtime)}/`)
             .replace(/\.claude\//g, `${getDirName(runtime)}/`)
-            .replace(/\{\{GSD_VERSION\}\}/g, pkg.version),
+            .replace(/\{\{GSD_VERSION\}\}/g, pkg.version)
+            .replace(/\{\{GSD_NODE_TOKEN\}\}/g, (m) => stampGsdNodeToken(m)),
         });
       }
       console.log(`  ${green}✓${reset} Installed hooks (Codex)`);
