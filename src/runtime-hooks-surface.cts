@@ -790,7 +790,8 @@ const CHAIN_SINGLE_SCRIPT = /^"\$\(for n in [\s\S]*?printf '%s' "\$n" && break; 
  * hooks/gsd-node-runner.sh (ADR-0135 Decisão 4 b).
  *
  * Only commands whose single script argument has a managed basename AND lives
- * in this config's hooks dir (absolute or `$HOME` form) are re-derived: the
+ * in this config's hooks dir (absolute or `$HOME` form, compared as canonical
+ * keys so spelling and symlinks don't matter) are re-derived: the
  * builder discards the directory, so a same-named script elsewhere would be
  * silently pointed at GSD's copy. They go through the same `buildCommand` the
  * installer uses to register that hook, so each migrated JS hook command is
@@ -805,10 +806,14 @@ function reconcileManagedChainCommandsToRunner(
   configDir: string,
 ): boolean {
   if (!settings || !settings.hooks || typeof buildCommand !== 'function' || !configDir) return false;
-  const ownedDirs = new Set([
-    shellCmdProjection.posixNormalize(configDir) + '/hooks',
-    shellCmdProjection.projectPortableHookBaseDir({ configDir, homeDir: os.homedir() }) + '/hooks',
-  ]);
+  // Compare canonical keys, never spellings: a trailing slash, `//`, `./` or a
+  // symlinked config dir must not leave a managed hook on the chain (fail-open).
+  const dirKey = (dir: string): string => {
+    let p = dir.startsWith('$HOME/') ? os.homedir() + dir.slice('$HOME'.length) : dir;
+    try { p = fs.realpathSync(p); } catch { /* not on disk: key the spelling */ }
+    return shellCmdProjection.toComparablePathKey(p);
+  };
+  const ownedKey = dirKey(path.join(configDir, 'hooks'));
   let changed = false;
   for (const entries of Object.values(settings.hooks)) {
     if (!Array.isArray(entries)) continue;
@@ -820,7 +825,9 @@ function reconcileManagedChainCommandsToRunner(
         const m = h.command.trim().match(CHAIN_SINGLE_SCRIPT);
         if (!m) continue;
         const scriptPath = shellCmdProjection.posixNormalize(m[1] || m[2] || m[3] || '');
-        if (!ownedDirs.has(path.posix.dirname(scriptPath))) continue;
+        // A relative token would resolve against the cwd, so it is never ours.
+        if (!/^([A-Za-z]:)?\//.test(scriptPath) && !scriptPath.startsWith('$HOME/')) continue;
+        if (dirKey(path.posix.dirname(scriptPath)) !== ownedKey) continue;
         if (!isManagedHookBasename(scriptPath, { surface: 'settings-json' })) continue;
         const next = buildCommand(path.posix.basename(scriptPath));
         if (!next || next === h.command) continue;

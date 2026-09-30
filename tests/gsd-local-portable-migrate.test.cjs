@@ -151,6 +151,57 @@ describe('[gsd-local] reconcileManagedChainCommandsToRunner: which commands it o
     assert.deepEqual(run(cmd), { changed: false, command: cmd });
   });
 
+  test('the same dir spelled differently is still GSD\'s (trailing slash, //, ./)', () => {
+    // Re-verify of gsd-core#2: exact string compare left all 14 on the chain
+    // (fail-open) when a plain install ran with `--config-dir <root>/`.
+    for (const [cfg, token] of [
+      [ROOT + '/', `"${ROOT}/hooks/gsd-prompt-guard.js"`],
+      [ROOT, `"${ROOT}//hooks/gsd-prompt-guard.js"`],
+      [ROOT, `"${ROOT}/./hooks/gsd-prompt-guard.js"`],
+    ]) {
+      const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: PREFIX + token }] }] } };
+      assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, cfg), true, `${cfg} ${token}`);
+      assert.equal(s.hooks.PreToolUse[0].hooks[0].command, 'RUNNER gsd-prompt-guard.js');
+    }
+  });
+
+  test('a symlinked config dir owns the real dir\'s scripts, both ways', (t) => {
+    const base = createTempDir('gsd-local-portmig-link-');
+    t.after(() => cleanup(base));
+    const real = path.join(base, 'real');
+    fs.mkdirSync(path.join(real, 'hooks'), { recursive: true });
+    const link = path.join(base, 'link');
+    fs.symlinkSync(real, link);
+    for (const [cfg, dir] of [[link, real], [real, link]]) {
+      const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: PREFIX + JSON.stringify(`${dir}/hooks/gsd-prompt-guard.js`) }] }] } };
+      assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, cfg), true, `cfg=${cfg} script in ${dir}`);
+    }
+    const other = path.join(base, 'other');
+    fs.mkdirSync(path.join(other, 'hooks'), { recursive: true });
+    const cmd = PREFIX + JSON.stringify(`${other}/hooks/gsd-prompt-guard.js`);
+    const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: cmd }] }] } };
+    assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, link), false, 'control: a real OTHER dir stays foreign');
+  });
+
+  test('a relative token is never ours, even with the cwd inside the config hooks dir', () => {
+    const base = createTempDir('gsd-local-portmig-rel-');
+    const hooks = path.join(base, 'hooks');
+    fs.mkdirSync(hooks, { recursive: true });
+    const cwd = process.cwd();
+    let changed;
+    try {
+      process.chdir(hooks);
+      const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: PREFIX + '"gsd-prompt-guard.js"' }] }] } };
+      changed = hooksSurface.reconcileManagedChainCommandsToRunner(s, build, base);
+      const c = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: PREFIX + JSON.stringify(path.join(hooks, 'gsd-prompt-guard.js')) }] }] } };
+      assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(c, build, base), true, 'control: the absolute spelling of the same file is ours');
+    } finally {
+      process.chdir(cwd);
+      cleanup(base);
+    }
+    assert.equal(changed, false);
+  });
+
   test('an args-form entry is left alone', () => {
     const cmd = PREFIX + `"${ROOT}/hooks/gsd-prompt-guard.js"`;
     assert.deepEqual(run(cmd, { args: ['x'] }), { changed: false, command: cmd });
