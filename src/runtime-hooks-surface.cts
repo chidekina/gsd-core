@@ -773,6 +773,53 @@ function rewriteLegacyManagedNodeHookCommands(settings: Settings, runnerToken: s
   return changed;
 }
 
+// [gsd-local] A managed JS hook command in the inline-chain shape, with the
+// script as its single quoted (or bare) argument. Anything with extra tokens
+// is left alone, like the rewriter above leaves args-form entries alone.
+const CHAIN_SINGLE_SCRIPT = /^"\$\(for n in [\s\S]*?printf '%s' "\$n" && break; done\)"\s+(?:"([^"]+)"|(\S+))\s*$/;
+
+/**
+ * [gsd-local] Migrate an existing install to the portable node runner.
+ *
+ * The rewriter above skips every command already in the chain shape, and
+ * registration is only-if-absent, so re-running the installer with
+ * `--portable-hooks` over a plain install left every managed JS hook on the
+ * inline chain. With no node that chain exits 127 (non-blocking) and a
+ * PreToolUse guard fails open; the fail-closed branch is only in
+ * hooks/gsd-node-runner.sh (ADR-0135 Decisão 4 b).
+ *
+ * Only commands whose single script argument has a managed basename are
+ * re-derived, through the same `buildCommand` the installer uses to register
+ * that hook, so the result is byte-identical to a fresh portable install.
+ * The caller decides when this runs (portable global installs only).
+ */
+function reconcileManagedChainCommandsToRunner(
+  settings: Settings,
+  buildCommand: (hookFile: string) => string | null,
+): boolean {
+  if (!settings || !settings.hooks || typeof buildCommand !== 'function') return false;
+  let changed = false;
+  for (const entries of Object.values(settings.hooks)) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (!entry || !Array.isArray(entry.hooks)) continue;
+      for (const h of entry.hooks) {
+        if (!h || typeof h.command !== 'string') continue;
+        if (Array.isArray(h.args) && h.args.length > 0) continue;
+        const m = h.command.trim().match(CHAIN_SINGLE_SCRIPT);
+        if (!m) continue;
+        const scriptPath = m[1] || m[2] || '';
+        if (!isManagedHookBasename(scriptPath, { surface: 'settings-json' })) continue;
+        const next = buildCommand(path.basename(scriptPath.replace(/\\/g, '/')));
+        if (!next || next === h.command) continue;
+        h.command = next;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 // ---------------------------------------------------------------------------
 // Shared: reconcileManagedShellHookCommands (#3329)
 // ---------------------------------------------------------------------------
@@ -3599,6 +3646,7 @@ export = {
   validateConfiguredEntrypoints,
   referencesHook,
   rewriteLegacyManagedNodeHookCommands,
+  reconcileManagedChainCommandsToRunner,
   reconcileManagedShellHookCommands,
   normalizeNodePath,
   resolveNodeRunner,

@@ -13382,6 +13382,16 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
     // filter below already discards entries no hook actually references.
     configuredEntrypoints: settingsEntrypoints,
   };
+  // [gsd-local] --portable-hooks over an existing install: registration is
+  // only-if-absent and the rewriter above skips chain commands, so without this
+  // every managed JS hook kept the inline chain (exit 127 with no node, guards
+  // fail open). Re-derive them with the same builder the registration uses.
+  if (hasPortableHooks && isGlobal && hooksSurface.reconcileManagedChainCommandsToRunner(
+    settings,
+    (hookFile) => buildHookCommand(targetDir, hookFile, hookOpts),
+  )) {
+    console.log(`  ${green}✓${reset} Migrated managed hook commands to the portable node runner [gsd-local]`);
+  }
   // #2979: local-install hook commands also use a runner GUI/minimal-PATH
   // runtimes can resolve. Bare `node` fails when the host launches the
   // runtime with a stripped PATH (Finder/Antigravity/etc) — #3662 replaces
