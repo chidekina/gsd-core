@@ -18,7 +18,7 @@ gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE
 
 # Resolve project root via upward traversal (AUTO-01 / AUTO-02) — [gsd-local]
 CWD="${CLAUDE_CWD:-$(pwd)}"
-. "$HOME/.claude/hooks/gsd-find-project-root.sh"
+. "$HOOK_DIR/gsd-find-project-root.sh"   # [gsd-local] shipped beside this hook (gsd-core#3)
 find_gsd_project_root "$CWD"
 [ -z "$PROJECT_ROOT" ] && exit 0
 

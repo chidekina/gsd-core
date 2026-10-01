@@ -57,6 +57,25 @@ HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
 gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
+# [gsd-local] Does config $1 enable this hook, decided WITHOUT node (used only when node is gone)?
+# python3 present and the JSON parses: exact (hooks.community === true, escapes decoded). Otherwise a
+# SUPERSET: the literal key, or ANY \uXXXX escape — a key written escaped could be "community", and
+# a guess here must fail closed (gsd-core#3 re-review, NIT-2). Here-strings, never `| grep -q`.
+config_may_enable() {
+  local rc flat
+  if command -v python3 >/dev/null 2>&1; then
+    rc=0
+    python3 -c 'import json,sys
+try: c=json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception: sys.exit(2)
+h=c.get("hooks") if isinstance(c,dict) else None
+sys.exit(0 if isinstance(h,dict) and h.get("community") is True else 1)' "$1" 2>/dev/null || rc=$?
+    [ "$rc" = 2 ] || return "$rc"   # 0 enabled, 1 not: exact; 2 unparsable: fall through
+  fi
+  flat=$(tr -d '\r\n' < "$1")
+  grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$flat" || grep -q '\\u[0-9A-Fa-f]\{4\}' <<< "$flat"
+}
+
 INPUT=$(cat)
 
 # Check opt-in config — exit silently if not enabled
@@ -106,7 +125,7 @@ if [ -f .planning/config.json ]; then
     # Here-strings, not `| grep -q`: under pipefail an early grep exit SIGPIPEs
     # the producer and reads as no match.
     if grep -q 'gsd-node-runner: no usable node' "$ENABLED_ERR" \
-      && grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$(tr -d '\r\n' < .planning/config.json)" \
+      && config_may_enable .planning/config.json \
       && grep -q 'commit' <<< "$INPUT"; then
       cat "$ENABLED_ERR" >&2; echo >&2
       echo "gsd-validate-commit.sh: no node could be resolved — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2

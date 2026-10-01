@@ -82,6 +82,8 @@ const HOOKS_TO_COPY = [
   'gsd-session-state.sh',
   'gsd-validate-commit.sh',
   'gsd-phase-boundary.sh',
+  // [gsd-local] sourced by gsd-phase-boundary.sh and gsd-session-state.sh from their own dir
+  'gsd-find-project-root.sh',
   // Portable node resolver (#3662). Managed JS hook commands under
   // --portable-hooks route through it (bash <resolver> <baked-node>
   // <script>) so node resolves at hook-fire time in every environment

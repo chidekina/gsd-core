@@ -40,22 +40,26 @@ function project(t, config) {
 // distro ships /usr/bin/node, a plain `/usr/bin:/bin` PATH would let a bare
 // `node` resolve and every "routed through the runner" assertion pass
 // vacuously (gsd-core#3 review, MED-2).
-let nodeFreeBin;
-function nodeFreePath() {
-  if (nodeFreeBin) return nodeFreeBin;
-  nodeFreeBin = createTempDir('gsd-local-vc-node-nonode-bin-');
-  for (const dir of ['/usr/bin', '/bin']) {
+const strippedBins = new Map();
+function strippedPath(drop) {
+  const key = drop.join(',');
+  if (strippedBins.has(key)) return strippedBins.get(key);
+  const dir = createTempDir('gsd-local-vc-node-nonode-bin-');
+  for (const src of ['/usr/bin', '/bin']) {
     let names = [];
-    try { names = fs.readdirSync(dir); } catch { continue; }
+    try { names = fs.readdirSync(src); } catch { continue; }
     for (const n of names) {
-      if (n === 'node' || n === 'nodejs') continue;
-      const dst = path.join(nodeFreeBin, n);
-      if (!fs.existsSync(dst)) { try { fs.symlinkSync(path.join(dir, n), dst); } catch { /* skip */ } }
+      if (drop.some((d) => n === d || n.startsWith(d + '.') || /^python3/.test(d) && /^python3(\.\d+)?$/.test(n))) continue;
+      const dst = path.join(dir, n);
+      if (!fs.existsSync(dst)) { try { fs.symlinkSync(path.join(src, n), dst); } catch { /* skip */ } }
     }
   }
-  return nodeFreeBin;
+  strippedBins.set(key, dir);
+  return dir;
 }
-after(() => { if (nodeFreeBin) cleanup(nodeFreeBin); });
+const nodeFreePath = () => strippedPath(['node', 'nodejs']);
+const nodeAndPythonFreePath = () => strippedPath(['node', 'nodejs', 'python3', 'python']);
+after(() => { for (const d of strippedBins.values()) cleanup(d); });
 
 // No node on PATH and no runner fallbacks: only GSD_NODE (or the stamped token)
 // can resolve one.
@@ -81,6 +85,10 @@ test('CONTROL: the test PATH really has no node (else the routing assertions are
     interpreter: '/bin/bash', env: { ...process.env, PATH: nodeFreePath() }, timeoutMs: 5000,
   });
   assert.strictEqual(g.exitCode, 0, `test PATH lacks coreutils: ${g.stderr}`);
+  const py = runHook('-c', ['command -v python3 || command -v python'], {
+    interpreter: '/bin/bash', env: { ...process.env, PATH: nodeAndPythonFreePath() }, timeoutMs: 5000,
+  });
+  assert.strictEqual(py.exitCode, 1, `python resolves on the python-free PATH: ${py.stdout}`);
 });
 
 const ENABLED = { hooks: { community: true } };
@@ -97,6 +105,40 @@ describe('[gsd-local] gsd-validate-commit.sh with no resolvable node', () => {
   // The controls assert "not blocked", not "silent": with no node the #3838
   // config-read diagnostic still prints (upstream wants that noise for a
   // malformed config, which a shell pre-filter cannot tell apart).
+  // NIT-2 (#3 re-review): the shell decision must not miss a key written with a JSON escape
+  const ESCAPED_ON = '{"hooks":{"\\u0063ommunity":true}}\n';
+  const rawProject = (t, text) => {
+    const dir = createTempDir('gsd-local-vc-node-proj-');
+    t.after(() => cleanup(dir));
+    fs.mkdirSync(path.join(dir, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.planning', 'config.json'), text);
+    return dir;
+  };
+  test('escaped "community" key, python present -> exit 2 (decoded exactly)', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const r = fire(t, { cwd: rawProject(t, ESCAPED_ON), input: NONCONFORMING });
+    assert.strictEqual(r.exitCode, 2, `stderr: ${r.stderr}`);
+    assert.match(r.stderr, /commit blocked/);
+  });
+  test('escaped "community" key, no python either -> exit 2 (any \\u escape counts as may-enable)', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const r = fire(t, { cwd: rawProject(t, ESCAPED_ON), input: NONCONFORMING, env: { PATH: nodeAndPythonFreePath() } });
+    assert.strictEqual(r.exitCode, 2, `stderr: ${r.stderr}`);
+    assert.match(r.stderr, /commit blocked/);
+  });
+  test('control: community:false, no python -> exit 0, not blocked', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const r = fire(t, { cwd: project(t, { hooks: { community: false } }), input: NONCONFORMING, env: { PATH: nodeAndPythonFreePath() } });
+    assert.strictEqual(r.exitCode, 0, `stderr: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /commit blocked/);
+  });
+  test('control: escaped key set FALSE, python present -> exit 0 (python decides exactly)', (t) => {
+    if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+    const r = fire(t, { cwd: rawProject(t, '{"hooks":{"\\u0063ommunity":false}}\n'), input: NONCONFORMING });
+    assert.strictEqual(r.exitCode, 0, `stderr: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /commit blocked/);
+  });
+
   test('control: project that does not enable the hook -> exit 0, not blocked', (t) => {
     if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
     const r = fire(t, { cwd: project(t, { hooks: { community: false } }), input: NONCONFORMING });
@@ -171,12 +213,27 @@ describe('[gsd-local] installed .sh hooks carry the install-time node', () => {
     // the other shell files the fork routes through the runner: same content pin
     const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
     const baked = fs.readFileSync(path.join(root, 'hooks', 'gsd-validate-commit.sh'), 'utf8').match(/^GSD_NODE_BAKED=("[^"\n]*")$/m)[1];
-    for (const rel of ['gsd-graphify-update.sh', 'lib/gsd-graphify-rebuild.sh', 'gsd-node-runner.sh']) {
+    for (const rel of ['gsd-graphify-update.sh', 'lib/gsd-graphify-rebuild.sh', 'gsd-node-runner.sh', 'gsd-find-project-root.sh']) {
       const expected = fs.readFileSync(path.join(HOOKS_DIR, rel), 'utf8')
         .replace(/\{\{GSD_VERSION\}\}/g, version)
         .replace(/\{\{GSD_NODE_TOKEN\}\}/g, () => baked);
       assert.strictEqual(fs.readFileSync(path.join(root, 'hooks', rel), 'utf8'), expected, `${rel}: installed copy differs from the source under review`);
     }
+    // The advisory hooks find the project root through gsd-find-project-root.sh. It must ship
+    // beside them and be sourced from there: a HOME without ~/.claude/hooks/ (any runtime but
+    // this machine's Claude) killed both hooks at the `.` line under set -e (#3 re-review).
+    assert.ok(fs.existsSync(path.join(root, 'hooks', 'gsd-find-project-root.sh')), 'gsd-find-project-root.sh not installed');
+    const bareHome = createTempDir('gsd-local-vc-node-barehome-');
+    t.after(() => cleanup(bareHome));
+    const proj = project(t, ENABLED);
+    const pb = runHook(path.join(root, 'hooks', 'gsd-phase-boundary.sh'), [], {
+      interpreter: '/bin/bash', cwd: proj,
+      input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Write', tool_input: { file_path: path.join(proj, '.planning', 'STATE.md') } }),
+      env: { ...process.env, HOME: bareHome, CLAUDE_CWD: proj, PATH: nodeFreePath(), GSD_NODE_RUNNER_NO_FALLBACKS: '1', GSD_NODE: '' },
+      timeoutMs: 15000,
+    });
+    assert.strictEqual(pb.exitCode, 0, `phase-boundary under a bare HOME: ${pb.stderr}`);
+    assert.match(pb.stdout, /"planning_modified":true/, `phase-boundary produced no reminder: ${pb.stdout} ${pb.stderr}`);
     const hr = fire(t, { cwd: project(t, ENABLED), input: NONCONFORMING, hook: path.join(root, 'hooks', 'gsd-validate-commit.sh') });
     assert.strictEqual(hr.exitCode, 2, `stderr: ${hr.stderr}`);
     assert.doesNotMatch(hr.stderr, /validator disabled|no usable node/);
