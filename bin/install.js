@@ -414,7 +414,8 @@ const GSD_WINDSURF_HOOK_SCRIPTS = hooksSurface.GSD_WINDSURF_HOOK_SCRIPTS;
 // injection-patterns.js (#3504) is required by gsd-prompt-guard.js and
 // gsd-read-injection-scanner.js — the shared prompt-injection pattern list the
 // two guards require so their copies cannot drift.
-const GSD_HOOK_LIB_FILES = ['git-cmd.js', 'gsd-graphify-rebuild.sh', 'cursor-workspace.js', 'injection-patterns.js'];
+// [gsd-local] gsd-find-project-root.sh lives in lib/ so GSD never owns (or deletes) a user's hooks/gsd-find-project-root.sh (gsd-core#3).
+const GSD_HOOK_LIB_FILES = ['git-cmd.js', 'gsd-graphify-rebuild.sh', 'cursor-workspace.js', 'injection-patterns.js', 'gsd-find-project-root.sh'];
 
 /**
  * Directory name GSD stages its shared hook bundle under, inside a runtime's

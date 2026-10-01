@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # gsd-hook-version: {{GSD_VERSION}}
-# gsd-find-project-root.sh — [gsd-local] shipped with the hooks that source it (gsd-core#3).
+# gsd-find-project-root.sh — [gsd-local] shipped in hooks/lib (GSD_HOOK_LIB_FILES) for the hooks that source it
+# (gsd-core#3). A user file at hooks/gsd-find-project-root.sh is NOT ours: never written or removed.
 # Source this file (. helper.sh), do NOT execute. Defines find_gsd_project_root().
 # After call: $PROJECT_ROOT (absolute path, or "" if not found) and $PROJECT_NAME (or "unknown")
 #
 # Usage in hooks:
-#   . "$HOOK_DIR/gsd-find-project-root.sh"   # beside the hook, never a runtime-specific $HOME path
-#   find_gsd_project_root "${CLAUDE_CWD:-$(pwd)}"
-#   [ -z "$PROJECT_ROOT" ] && exit 0
+#   . "$HOOK_DIR/lib/gsd-find-project-root.sh"   # GSD-owned copy, never a runtime-specific $HOME path
+#   find_gsd_project_root "${CLAUDE_CWD:-$(pwd)}" 2>/dev/null || exit 0   # returns 1 when not found
 #
 # T-09-02 mitigation: [ "$parent" = "$search" ] && break — prevents infinite loop at filesystem root.
 # T-09-03 note: 4-level cap avoids ancestor project collision; projects nested >4 levels deep are

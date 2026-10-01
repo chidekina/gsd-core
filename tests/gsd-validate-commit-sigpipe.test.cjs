@@ -424,7 +424,12 @@ describe('#4429 — subprocess statuses must not be inherited from the environme
     );
   });
 
-  test('a GENUINE subprocess failure still fails open, as #3838 requires', (t) => {
+  // [gsd-local] FLIPPED (operator decision 2026-10-01, gsd-core#3 second re-review MEDIUM-2):
+  // a node that fails WITHOUT the inline script's CONFIG_READ_FAILED marker never ran the
+  // opt-in check, so in an enabled project on a commit the hook now fails CLOSED. Upstream
+  // #3838 fails open here. A node that ran and reported CONFIG_READ_FAILED still fails open
+  // (gsd-local-validate-commit-node.test.cjs, "node RAN and reported CONFIG_READ_FAILED").
+  test('[gsd-local] a node that never runs the opt-in check fails CLOSED (upstream #3838: open)', (t) => {
     const hook = makeHookLayout(t);
     const dir = makeProject(t, 0);
     // A `node` that always fails, rather than removing node from PATH: node
@@ -438,18 +443,11 @@ describe('#4429 — subprocess statuses must not be inherited from the environme
     const res = runValidate(hook, dir, NON_CONFORMING, {
       PATH: `${binDir}${path.delimiter}${hookEnv.PATH}`,
     });
-    // This row EXPECTS a fail-open, so exit 0 alone cannot tell "the node shim
-    // made the config read fail" from "the layout was broken and the classifier
-    // could not load". Only the latter emits CLASSIFIER_THREW, so this pins the
-    // pass to the cause the row actually names.
-    assertSubstantive(res, 'genuine fail-open row');
-    assert.equal(
-      res.status,
-      0,
-      'a real subprocess failure must still disable the validator and pass (#3838); '
-      + 'the pre-init must close the ambient bypass WITHOUT closing this path',
-    );
-    assert.match(res.stderr, /validator disabled for this call/);
+    // assertSubstantive still pins the cause: a broken layout emits CLASSIFIER_THREW.
+    assertSubstantive(res, 'node-never-ran fail-closed row');
+    assert.equal(res.status, 2, `the shim node never ran the opt-in check: ${res.stderr}`);
+    assert.match(res.stderr, /commit blocked \(fail closed\)/);
+    assert.doesNotMatch(res.stderr, /validator disabled for this call/);
   });
 });
 

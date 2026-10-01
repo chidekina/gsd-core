@@ -19,12 +19,15 @@ gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE
 
 # Resolve project root via upward traversal (AUTO-01 / AUTO-02)
 CWD="${CLAUDE_CWD:-$(pwd)}"
-. "$HOOK_DIR/gsd-find-project-root.sh"   # [gsd-local] shipped beside this hook (gsd-core#3)
-find_gsd_project_root "$CWD"
-[ -z "$PROJECT_ROOT" ] && exit 0
+. "$HOOK_DIR/lib/gsd-find-project-root.sh"   # [gsd-local] GSD-owned copy in hooks/lib (gsd-core#3)
+# Not found returns 1, and under set -e that ended the hook with exit 1 before the
+# empty-root check ran: every edit outside a GSD project showed a hook error.
+find_gsd_project_root "$CWD" 2>/dev/null || exit 0
 
 # Check opt-in config — exit silently if not enabled
-ENABLED=$(gsd_node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
+GSD_CFG="$PROJECT_ROOT/.planning/config.json"   # passed by env, never pasted into JS source
+export GSD_CFG
+ENABLED=$(gsd_node -e "try{const c=require(process.env.GSD_CFG);process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
 [ "$ENABLED" != "1" ] && exit 0
 
 INPUT=$(cat)

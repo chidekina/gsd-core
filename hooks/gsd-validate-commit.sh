@@ -61,19 +61,40 @@ gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE
 # python3 present and the JSON parses: exact (hooks.community === true, escapes decoded). Otherwise a
 # SUPERSET: the literal key, or ANY \uXXXX escape — a key written escaped could be "community", and
 # a guess here must fail closed (gsd-core#3 re-review, NIT-2). Here-strings, never `| grep -q`.
+# python3's verdicts are 10 (enabled) and 11 (not) ONLY: a python that cannot start exits 1 or 127,
+# and reading 1 as "not enabled" failed OPEN (gsd-core#3 second re-review, HIGH-1). Anything else
+# falls through to the grep superset.
 config_may_enable() {
   local rc flat
   if command -v python3 >/dev/null 2>&1; then
     rc=0
     python3 -c 'import json,sys
 try: c=json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception: sys.exit(2)
+except Exception: sys.exit(12)
 h=c.get("hooks") if isinstance(c,dict) else None
-sys.exit(0 if isinstance(h,dict) and h.get("community") is True else 1)' "$1" 2>/dev/null || rc=$?
-    [ "$rc" = 2 ] || return "$rc"   # 0 enabled, 1 not: exact; 2 unparsable: fall through
+sys.exit(10 if isinstance(h,dict) and h.get("community") is True else 11)' "$1" 2>/dev/null || rc=$?
+    case "$rc" in 10) return 0 ;; 11) return 1 ;; esac
   fi
   flat=$(tr -d '\r\n' < "$1")
   grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$flat" || grep -q '\\u[0-9A-Fa-f]\{4\}' <<< "$flat"
+}
+
+# [gsd-local] May payload $1 carry a git commit, decided WITHOUT node? A SUPERSET of isGitSubcommand.
+# The command comes from tool_input.command via python3 when it can (so "commit" in cwd, description
+# or transcript_path does not block an `ls`, LOW-1); otherwise the raw payload. Quotes and backslashes
+# are removed first, the way bash removes them (`c'o'mmit`, `co""mmit`, `co\mmit` ARE commit, MEDIUM-1),
+# and a `$'` ANSI-C string or a JSON \u escape is undecidable here, so it counts as may-commit.
+command_may_commit() {
+  local text rc=0
+  text=$(python3 -c 'import json,sys
+c=json.load(sys.stdin).get("tool_input",{}).get("command","")
+if not isinstance(c,str): sys.exit(12)
+sys.stdout.write(c)' <<< "$1" 2>/dev/null) || rc=$?
+  [ "$rc" = 0 ] || text=$1
+  grep -q "\\\$'" <<< "$text" && return 0
+  grep -q '\\u[0-9A-Fa-f]\{4\}' <<< "$text" && return 0
+  text=$(tr -d "\"'\\\\" <<< "$text")
+  grep -q 'commit' <<< "$text"
 }
 
 INPUT=$(cat)
@@ -116,19 +137,22 @@ if [ -f .planning/config.json ]; then
   # silently accepting a non-conforming commit. Found by review of #4429.
   CONFIG_STATUS=${CONFIG_STATUS:-0}
   if [ "$CONFIG_STATUS" != "0" ]; then
-    # [gsd-local] FAIL CLOSED when the failure is that no node resolves at all
-    # (the runner's own diagnostic, gsd-node-runner.sh), in a project that
-    # enables this hook, on a command that may be a commit. Both shell checks
-    # are SUPERSETS of what node would decide (opt-in flag, isGitSubcommand).
-    # A node that resolves but fails keeps the #3838 fail-open below; so does a
-    # missing runner file (its error is not the runner's diagnostic).
+    # [gsd-local] FAIL CLOSED when node never RAN the inline script, in a project
+    # that enables this hook, on a command that may be a commit. The script
+    # writes CONFIG_READ_FAILED on every failure it handles, so a failure
+    # WITHOUT that marker came from before it: no node resolved, the runner file
+    # is missing (127), or a node that resolves but does not work (a shim with
+    # no version set). Operator decision 2026-10-01 (gsd-core#3 second
+    # re-review, MEDIUM-2): upstream #3838 fails open on these; a node that ran
+    # and reported CONFIG_READ_FAILED still does. Both shell checks are
+    # SUPERSETS of what node would decide (opt-in flag, isGitSubcommand).
     # Here-strings, not `| grep -q`: under pipefail an early grep exit SIGPIPEs
     # the producer and reads as no match.
-    if grep -q 'gsd-node-runner: no usable node' "$ENABLED_ERR" \
+    if ! grep -q 'CONFIG_READ_FAILED' "$ENABLED_ERR" \
       && config_may_enable .planning/config.json \
-      && grep -q 'commit' <<< "$INPUT"; then
+      && command_may_commit "$INPUT"; then
       cat "$ENABLED_ERR" >&2; echo >&2
-      echo "gsd-validate-commit.sh: no node could be resolved — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2
+      echo "gsd-validate-commit.sh: node did not run the opt-in check (exit $CONFIG_STATUS) — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2
       exit 2
     fi
     # Could not determine the opt-in flag at all (node missing, JSON parse

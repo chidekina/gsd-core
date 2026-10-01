@@ -28,8 +28,6 @@ const MANAGED_HOOKS = [
   'gsd-cursor-subagent-start.js',
   'gsd-cursor-subagent-stop.js',
   'gsd-ensure-canonical-path.js',
-  // [gsd-local] project-root helper sourced by the two advisory .sh hooks (gsd-core#3)
-  'gsd-find-project-root.sh',
   'gsd-graphify-update.sh',
   // #3662: portable node resolver (helper staged in hooks/; managed JS hook
   // commands route through it under --portable-hooks).
