@@ -15,6 +15,7 @@ const path = require('node:path');
 const { createTempDir, cleanup } = require('./helpers.cjs');
 const { runNode, runHook } = require('./helpers/process-seam.cjs');
 const { INSTALL_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+const { bareNodeLines } = require('./helpers/bare-node.cjs');
 
 const INSTALL_SCRIPT = path.join(__dirname, '..', 'bin', 'install.js');
 const HOOK_SRC = path.join(__dirname, '..', 'hooks', 'gsd-graphify-update.sh');
@@ -159,7 +160,7 @@ describe('[gsd-local] gsd-graphify-update.sh resolves node through the runner', 
     for (const file of [HOOK_SRC, helper]) {
       const body = fs.readFileSync(file, 'utf8');
       const code = body.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-      assert.ok(!/(^|[\s|(])node\s+-e\b/m.test(code), `bare \`node -e\` still present in ${path.basename(file)}`);
+      assert.deepStrictEqual(bareNodeLines(body), [], `bare node still present in ${path.basename(file)}`);
       assert.ok(code.includes('gsd-node-runner.sh'), `${path.basename(file)} does not call the node runner`);
     }
   });

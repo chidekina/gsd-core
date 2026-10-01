@@ -17,6 +17,7 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 const { runNode, runHook } = require('./helpers/process-seam.cjs');
 const { INSTALL_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 const { BUILD_HOOKS_SCRIPT } = require('./helpers/hooks-dist.cjs');
+const { bareNodeLines } = require('./helpers/bare-node.cjs');
 
 const INSTALL_SCRIPT = path.join(__dirname, '..', 'bin', 'install.js');
 const HOOKS_DIR = path.join(__dirname, '..', 'hooks');
@@ -131,13 +132,7 @@ describe('[gsd-local] gsd-validate-commit.sh resolves node through the runner at
   test('no bare `node` invocation left in the three .sh hooks', () => {
     for (const name of NODE_SH_HOOKS) {
       const body = fs.readFileSync(path.join(HOOKS_DIR, name), 'utf8');
-      const bare = body.split('\n')
-        .map((line, i) => [i + 1, line])
-        // command position only (line start, `$(`, a pipe/list operator, or after env
-        // assignments), followed by an argument: -e/-p/--eval/--input-type, a quoted
-        // script or a variable — prose like "no node could be resolved" never matches
-        .filter(([, line]) => !/^\s*#/.test(line)
-          && /(^|\$\(|[|;&]|&&|\|\|)\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*node\s+(-e\b|-p\b|--eval\b|--input-type|["'$])/.test(line));
+      const bare = bareNodeLines(body);
       assert.deepStrictEqual(bare, [], `${name} still calls bare node at line(s) ${bare.map(([n]) => n).join(', ')}`);
       // control: the file does call node, through gsd_node
       assert.match(body, /\bgsd_node\s+-e\b/, `${name} has no gsd_node call: the check above would pass vacuously`);
@@ -172,6 +167,15 @@ describe('[gsd-local] installed .sh hooks carry the install-time node', () => {
         .replace(/\{\{GSD_VERSION\}\}/g, version)
         .replace(/\{\{GSD_NODE_TOKEN\}\}/g, () => m[1]);
       assert.strictEqual(body, expected, `${name}: installed copy differs from the source under review`);
+    }
+    // the other shell files the fork routes through the runner: same content pin
+    const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+    const baked = fs.readFileSync(path.join(root, 'hooks', 'gsd-validate-commit.sh'), 'utf8').match(/^GSD_NODE_BAKED=("[^"\n]*")$/m)[1];
+    for (const rel of ['gsd-graphify-update.sh', 'lib/gsd-graphify-rebuild.sh', 'gsd-node-runner.sh']) {
+      const expected = fs.readFileSync(path.join(HOOKS_DIR, rel), 'utf8')
+        .replace(/\{\{GSD_VERSION\}\}/g, version)
+        .replace(/\{\{GSD_NODE_TOKEN\}\}/g, () => baked);
+      assert.strictEqual(fs.readFileSync(path.join(root, 'hooks', rel), 'utf8'), expected, `${rel}: installed copy differs from the source under review`);
     }
     const hr = fire(t, { cwd: project(t, ENABLED), input: NONCONFORMING, hook: path.join(root, 'hooks', 'gsd-validate-commit.sh') });
     assert.strictEqual(hr.exitCode, 2, `stderr: ${hr.stderr}`);
