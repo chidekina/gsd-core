@@ -8,6 +8,15 @@
 # Enable with: "hooks": { "community": true } in .planning/config.json
 set -euo pipefail
 
+# [gsd-local] every node call goes through the node runner, never a bare
+# `node`, so a minimal hook PATH still resolves one. The installer stamps the
+# install-time node here; unstamped, the runner falls through to its
+# fallbacks. GSD_NODE (env, optional) overrides it for this script only.
+# Failure semantics are unchanged: this hook is advisory.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+
 # Resolve project root via upward traversal (AUTO-01 / AUTO-02)
 CWD="${CLAUDE_CWD:-$(pwd)}"
 . "$HOME/.claude/hooks/gsd-find-project-root.sh"
@@ -15,7 +24,7 @@ find_gsd_project_root "$CWD"
 [ -z "$PROJECT_ROOT" ] && exit 0
 
 # Check opt-in config — exit silently if not enabled
-ENABLED=$(node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
+ENABLED=$(gsd_node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
 [ "$ENABLED" != "1" ] && exit 0
 
 INPUT=$(cat)
@@ -33,7 +42,7 @@ INPUT=$(cat)
 # via an upstream normalizeKimiPayload step (copies path→file_path before any guard
 # reads); this shell hook parses tool_input once, raw, so it applies the precedence
 # directly at the read site.
-FILE=$(echo "$INPUT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d).tool_input||{};process.stdout.write((typeof i.path==='string'&&i.path)||(typeof i.file_path==='string'&&i.file_path)||'')}catch{}})" 2>/dev/null)
+FILE=$(echo "$INPUT" | gsd_node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d).tool_input||{};process.stdout.write((typeof i.path==='string'&&i.path)||(typeof i.file_path==='string'&&i.file_path)||'')}catch{}})" 2>/dev/null)
 
 # Emit a structured JSON envelope (#2974). additionalContext carries the
 # user-visible reminder text; the typed `planning_modified` boolean and
@@ -44,7 +53,7 @@ if [[ "$FILE" == *.planning/* ]] || [[ "$FILE" == .planning/* ]]; then
 fi
 
 if [ "$PLANNING_MODIFIED" = "true" ]; then
-  node -e '
+  gsd_node -e '
     const file = process.argv[1];
     const additionalContext = ".planning/ file modified: " + file + "\n" +
       "Check: Should STATE.md be updated to reflect this change?";

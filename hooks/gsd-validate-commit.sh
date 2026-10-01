@@ -46,6 +46,41 @@ trap cleanup_temp_files EXIT
 # bash below when building COMMIT_TYPES.
 BUILTIN_COMMIT_TYPES=(feat fix docs style refactor perf test build ci chore)
 
+# [gsd-local] every node call goes through the node runner, never a bare
+# `node`: under a minimal hook PATH a bare node fails with 127 at every site,
+# and each #3838 "could not run" branch below turned that into exit 0 — this
+# PreToolUse guard failed OPEN. The installer stamps the install-time node
+# here (as the JS hooks get it in their command); unstamped, the literal is
+# not an absolute path and the runner falls through to its fallbacks.
+# GSD_NODE (env, optional) overrides the baked node for this script only.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+
+INPUT=$(cat)
+
+# [gsd-local] no resolvable node at all, in a project that enables this hook,
+# on a command that may be a commit: block (exit 2) and say why. Both shell
+# checks are SUPERSETS of what node decides below (opt-in flag, isGitSubcommand),
+# so the resolution probe runs only for candidate commits in enabled projects.
+# Only the runner's own "no usable node" diagnostic counts as unresolvable: a
+# node that resolves but fails (exit status alone cannot tell them apart)
+# keeps the #3838 fail-open below. Here-strings, not `| grep -q`: under
+# pipefail an early grep exit SIGPIPEs the producer and reads as no match.
+if [ -f .planning/config.json ] \
+  && grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$(tr -d '\r\n' < .planning/config.json)" \
+  && grep -q 'commit' <<< "$INPUT"; then
+  NODE_PROBE_ERR=""
+  NODE_PROBE_ERR=$(gsd_node -e '' < /dev/null 2>&1 >/dev/null) || true
+  case "$NODE_PROBE_ERR" in
+    *"gsd-node-runner: no usable node"*)
+      printf '%s\n' "$NODE_PROBE_ERR" >&2
+      echo "gsd-validate-commit.sh: no node could be resolved — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2
+      exit 2
+      ;;
+  esac
+fi
+
 # Check opt-in config — exit silently if not enabled
 if [ -f .planning/config.json ]; then
   ENABLED_ERR=$(mktemp)
@@ -56,7 +91,7 @@ if [ -f .planning/config.json ]; then
   # built below, so a configured value can never alter the compiled pattern's
   # structure.
   BUILTIN_COMMIT_TYPES_CSV=$(IFS=,; echo "${BUILTIN_COMMIT_TYPES[*]}")
-  CONFIG_OUT=$(GSD_BUILTIN_COMMIT_TYPES="$BUILTIN_COMMIT_TYPES_CSV" node -e "
+  CONFIG_OUT=$(GSD_BUILTIN_COMMIT_TYPES="$BUILTIN_COMMIT_TYPES_CSV" gsd_node -e "
     try{
       const c=require('./.planning/config.json');
       process.stdout.write(c.hooks?.community===true?'1':'0');
@@ -108,11 +143,9 @@ else
   exit 0
 fi
 
-INPUT=$(cat)
-
 # Extract command from JSON using Node (handles escaping correctly, no jq needed)
 CMD_ERR=$(mktemp)
-CMD=$(echo "$INPUT" | node -e "
+CMD=$(echo "$INPUT" | gsd_node -e "
   let d='';
   process.stdin.on('data',c=>d+=c);
   process.stdin.on('end',()=>{
@@ -143,9 +176,8 @@ fi
 # Delegates to hooks/lib/git-cmd.js isGitSubcommand() — the canonical token-walk
 # classifier that handles env-prefix, -C path, and full-path git invocations.
 # A naive `^git\s+commit` regex misses all three; this guard fixes that (#3129).
-HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLASSIFY_ERR=$(mktemp)
-GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" node -e "
+GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" gsd_node -e "
   try {
     const {isGitSubcommand}=require(process.env.GIT_CMD_LIB);
     process.exit(isGitSubcommand(process.argv[1],'commit')?0:1);
@@ -572,7 +604,7 @@ if [ "$CLASSIFY_STATUS" = "0" ]; then
     fi
 
     if [ "$RESOLVE" = 1 ]; then
-      SUBJECT=$(GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" MSG="$MSG" node -e "
+      SUBJECT=$(GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" MSG="$MSG" gsd_node -e "
         const {resolveCommitSubject}=require(process.env.GIT_CMD_LIB);
         process.stdout.write(resolveCommitSubject(process.env.MSG));
       " 2>/dev/null) || SUBJECT="${MSG%%$'\n'*}"

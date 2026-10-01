@@ -7,6 +7,15 @@
 # Enable with: "hooks": { "community": true } in .planning/config.json
 set -euo pipefail
 
+# [gsd-local] every node call goes through the node runner, never a bare
+# `node`, so a minimal hook PATH still resolves one. The installer stamps the
+# install-time node here; unstamped, the runner falls through to its
+# fallbacks. GSD_NODE (env, optional) overrides it for this script only.
+# Failure semantics are unchanged: this hook is advisory.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+
 # Resolve project root via upward traversal (AUTO-01 / AUTO-02) — [gsd-local]
 CWD="${CLAUDE_CWD:-$(pwd)}"
 . "$HOME/.claude/hooks/gsd-find-project-root.sh"
@@ -14,7 +23,7 @@ find_gsd_project_root "$CWD"
 [ -z "$PROJECT_ROOT" ] && exit 0
 
 # Check opt-in config — exit silently if not enabled
-ENABLED=$(node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
+ENABLED=$(gsd_node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(c.hooks?.community===true?'1':'0')}catch{process.stdout.write('0')}" 2>/dev/null)
 [ "$ENABLED" != "1" ] && exit 0
 
 # Build the additionalContext text and emit it as a structured JSON
@@ -30,7 +39,7 @@ fi
 
 CONFIG_MODE="unknown"
 if [ -f "$PROJECT_ROOT/.planning/config.json" ]; then
-  CONFIG_MODE=$(node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(String(c.mode||'unknown'))}catch{process.stdout.write('unknown')}" 2>/dev/null)
+  CONFIG_MODE=$(gsd_node -e "try{const c=require('$PROJECT_ROOT/.planning/config.json');process.stdout.write(String(c.mode||'unknown'))}catch{process.stdout.write('unknown')}" 2>/dev/null)
 fi
 
 # Build watchPaths list — only include files that exist at session start
@@ -44,7 +53,7 @@ WATCH_JSON=$(printf '%s\n' "${WATCH_PATHS[@]}" | python3 -c "import sys,json; li
 # additionalContext is the text Claude Code injects at session start; the
 # typed fields (state_present, config_mode) let tests assert on the
 # structured contract without grepping the prose.
-node -e '
+gsd_node -e '
   const [statePresent, stateHead, configMode, watchJson] = process.argv.slice(1);
   const headerLines = ["## Project State Reminder", ""];
   if (statePresent === "true") {
