@@ -15,7 +15,7 @@ set -euo pipefail
 # Failure semantics are unchanged: this hook is advisory.
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
-gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
 # Resolve project root via upward traversal (AUTO-01 / AUTO-02)
 CWD="${CLAUDE_CWD:-$(pwd)}"

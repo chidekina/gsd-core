@@ -55,31 +55,9 @@ BUILTIN_COMMIT_TYPES=(feat fix docs style refactor perf test build ci chore)
 # GSD_NODE (env, optional) overrides the baked node for this script only.
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
-gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
 INPUT=$(cat)
-
-# [gsd-local] no resolvable node at all, in a project that enables this hook,
-# on a command that may be a commit: block (exit 2) and say why. Both shell
-# checks are SUPERSETS of what node decides below (opt-in flag, isGitSubcommand),
-# so the resolution probe runs only for candidate commits in enabled projects.
-# Only the runner's own "no usable node" diagnostic counts as unresolvable: a
-# node that resolves but fails (exit status alone cannot tell them apart)
-# keeps the #3838 fail-open below. Here-strings, not `| grep -q`: under
-# pipefail an early grep exit SIGPIPEs the producer and reads as no match.
-if [ -f .planning/config.json ] \
-  && grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$(tr -d '\r\n' < .planning/config.json)" \
-  && grep -q 'commit' <<< "$INPUT"; then
-  NODE_PROBE_ERR=""
-  NODE_PROBE_ERR=$(gsd_node -e '' < /dev/null 2>&1 >/dev/null) || true
-  case "$NODE_PROBE_ERR" in
-    *"gsd-node-runner: no usable node"*)
-      printf '%s\n' "$NODE_PROBE_ERR" >&2
-      echo "gsd-validate-commit.sh: no node could be resolved — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2
-      exit 2
-      ;;
-  esac
-fi
 
 # Check opt-in config — exit silently if not enabled
 if [ -f .planning/config.json ]; then
@@ -119,6 +97,21 @@ if [ -f .planning/config.json ]; then
   # silently accepting a non-conforming commit. Found by review of #4429.
   CONFIG_STATUS=${CONFIG_STATUS:-0}
   if [ "$CONFIG_STATUS" != "0" ]; then
+    # [gsd-local] FAIL CLOSED when the failure is that no node resolves at all
+    # (the runner's own diagnostic, gsd-node-runner.sh), in a project that
+    # enables this hook, on a command that may be a commit. Both shell checks
+    # are SUPERSETS of what node would decide (opt-in flag, isGitSubcommand).
+    # A node that resolves but fails keeps the #3838 fail-open below; so does a
+    # missing runner file (its error is not the runner's diagnostic).
+    # Here-strings, not `| grep -q`: under pipefail an early grep exit SIGPIPEs
+    # the producer and reads as no match.
+    if grep -q 'gsd-node-runner: no usable node' "$ENABLED_ERR" \
+      && grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$(tr -d '\r\n' < .planning/config.json)" \
+      && grep -q 'commit' <<< "$INPUT"; then
+      cat "$ENABLED_ERR" >&2; echo >&2
+      echo "gsd-validate-commit.sh: no node could be resolved — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2
+      exit 2
+    fi
     # Could not determine the opt-in flag at all (node missing, JSON parse
     # error other than absence, etc.) — distinct from ".planning/config.json
     # exists and legitimately disables the hook". Say so and pass, per #3838.

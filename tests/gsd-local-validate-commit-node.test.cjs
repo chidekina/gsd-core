@@ -8,7 +8,7 @@
 // the hook, on a command that may be a commit, blocks (exit 2) and says why. A
 // node that RESOLVES but fails one call keeps the #3838 fail-open (pinned by
 // gsd-validate-commit-crash-policy.test.cjs).
-const { describe, test } = require('node:test');
+const { describe, test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,6 +16,7 @@ const path = require('node:path');
 const { createTempDir, cleanup } = require('./helpers.cjs');
 const { runNode, runHook } = require('./helpers/process-seam.cjs');
 const { INSTALL_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+const { BUILD_HOOKS_SCRIPT } = require('./helpers/hooks-dist.cjs');
 
 const INSTALL_SCRIPT = path.join(__dirname, '..', 'bin', 'install.js');
 const HOOKS_DIR = path.join(__dirname, '..', 'hooks');
@@ -34,19 +35,52 @@ function project(t, config) {
   return dir;
 }
 
+// A PATH with every tool of /usr/bin and /bin EXCEPT node: on a host whose
+// distro ships /usr/bin/node, a plain `/usr/bin:/bin` PATH would let a bare
+// `node` resolve and every "routed through the runner" assertion pass
+// vacuously (gsd-core#3 review, MED-2).
+let nodeFreeBin;
+function nodeFreePath() {
+  if (nodeFreeBin) return nodeFreeBin;
+  nodeFreeBin = createTempDir('gsd-local-vc-node-nonode-bin-');
+  for (const dir of ['/usr/bin', '/bin']) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const n of names) {
+      if (n === 'node' || n === 'nodejs') continue;
+      const dst = path.join(nodeFreeBin, n);
+      if (!fs.existsSync(dst)) { try { fs.symlinkSync(path.join(dir, n), dst); } catch { /* skip */ } }
+    }
+  }
+  return nodeFreeBin;
+}
+after(() => { if (nodeFreeBin) cleanup(nodeFreeBin); });
+
 // No node on PATH and no runner fallbacks: only GSD_NODE (or the stamped token)
 // can resolve one.
 function fire(t, { cwd, input, env = {}, hook = HOOK_SRC }) {
-  const emptyBin = createTempDir('gsd-local-vc-node-emptybin-');
-  t.after(() => cleanup(emptyBin));
   return runHook(hook, [], {
     interpreter: '/bin/bash',
     cwd,
     input,
-    env: { ...process.env, CI: '', PATH: `${emptyBin}:/usr/bin:/bin`, GSD_NODE_RUNNER_NO_FALLBACKS: '1', GSD_NODE: '', ...env },
+    env: { ...process.env, CI: '', PATH: nodeFreePath(), GSD_NODE_RUNNER_NO_FALLBACKS: '1', GSD_NODE: '', ...env },
     timeoutMs: 15000,
   });
 }
+
+test('CONTROL: the test PATH really has no node (else the routing assertions are vacuous)', (t) => {
+  if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
+  // runHook spawns `<interpreter> <target> ...args`, so the target is `-c`
+  const r = runHook('-c', ['command -v node || command -v nodejs'], {
+    interpreter: '/bin/bash', env: { ...process.env, PATH: nodeFreePath() }, timeoutMs: 5000,
+  });
+  assert.strictEqual(r.exitCode, 1, `node resolves on the test PATH (or bash did not run): ${r.stdout}${r.stderr}`);
+  // and the PATH is not empty: the hook's own tools resolve
+  const g = runHook('-c', ['command -v grep && command -v tr && command -v mktemp'], {
+    interpreter: '/bin/bash', env: { ...process.env, PATH: nodeFreePath() }, timeoutMs: 5000,
+  });
+  assert.strictEqual(g.exitCode, 0, `test PATH lacks coreutils: ${g.stderr}`);
+});
 
 const ENABLED = { hooks: { community: true } };
 
@@ -99,7 +133,11 @@ describe('[gsd-local] gsd-validate-commit.sh resolves node through the runner at
       const body = fs.readFileSync(path.join(HOOKS_DIR, name), 'utf8');
       const bare = body.split('\n')
         .map((line, i) => [i + 1, line])
-        .filter(([, line]) => !/^\s*#/.test(line) && /(^|[\s($|;&])node\s+-e\b/.test(line));
+        // command position only (line start, `$(`, a pipe/list operator, or after env
+        // assignments), followed by an argument: -e/-p/--eval/--input-type, a quoted
+        // script or a variable — prose like "no node could be resolved" never matches
+        .filter(([, line]) => !/^\s*#/.test(line)
+          && /(^|\$\(|[|;&]|&&|\|\|)\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*node\s+(-e\b|-p\b|--eval\b|--input-type|["'$])/.test(line));
       assert.deepStrictEqual(bare, [], `${name} still calls bare node at line(s) ${bare.map(([n]) => n).join(', ')}`);
       // control: the file does call node, through gsd_node
       assert.match(body, /\bgsd_node\s+-e\b/, `${name} has no gsd_node call: the check above would pass vacuously`);
@@ -112,6 +150,11 @@ describe('[gsd-local] installed .sh hooks carry the install-time node', () => {
     if (process.platform === 'win32') { t.skip('POSIX sh execution lane'); return; }
     const root = createTempDir('gsd-local-vc-node-install-');
     t.after(() => cleanup(root));
+    // Rebuild hooks/dist unconditionally: install copies from dist, and a dist
+    // present but older than the source shipped a superseded guard while this
+    // test passed (gsd-core#3 review, MED-1). Then compare CONTENT below.
+    const b = runNode([BUILD_HOOKS_SCRIPT], { timeoutMs: INSTALL_TIMEOUT_MS });
+    assert.strictEqual(b.exitCode, 0, `build-hooks failed: ${b.stderr}`);
     const r = runNode([INSTALL_SCRIPT, '--claude', '--global', '--config-dir', root], {
       env: { ...process.env, HOME: root, USERPROFILE: root },
       timeoutMs: INSTALL_TIMEOUT_MS,
@@ -123,6 +166,12 @@ describe('[gsd-local] installed .sh hooks carry the install-time node', () => {
       const m = body.match(/^GSD_NODE_BAKED=("[^"\n]*")$/m);
       assert.ok(m, `${name} has no GSD_NODE_BAKED line`);
       assert.ok(/\/node(\.exe)?"$/.test(m[1]), `${name} baked token is not a node path: ${m[1]}`);
+      // installed body == reviewed source, with only the two install stamps applied
+      const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+      const expected = fs.readFileSync(path.join(HOOKS_DIR, name), 'utf8')
+        .replace(/\{\{GSD_VERSION\}\}/g, version)
+        .replace(/\{\{GSD_NODE_TOKEN\}\}/g, () => m[1]);
+      assert.strictEqual(body, expected, `${name}: installed copy differs from the source under review`);
     }
     const hr = fire(t, { cwd: project(t, ENABLED), input: NONCONFORMING, hook: path.join(root, 'hooks', 'gsd-validate-commit.sh') });
     assert.strictEqual(hr.exitCode, 2, `stderr: ${hr.stderr}`);

@@ -19,7 +19,7 @@ set -uo pipefail
 # It must be an absolute path; anything else is rejected by the runner's
 # executable check, which then falls through to its own candidates.
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
-gsd_node() { sh "$(cd "$(dirname "$0")/.." && pwd)/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+gsd_node() { "${BASH:-sh}" "$(cd "$(dirname "$0")/.." && pwd)/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
 STATUS_FILE="${1:?STATUS_FILE required}"
 LOCK_FILE="${2:?LOCK_FILE required}"

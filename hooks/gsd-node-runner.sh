@@ -89,6 +89,8 @@ if [ -z "$found" ]; then
   if [ "$target" = "-e" ]; then
     target='an inline node script (-e)'
   fi
+  # [gsd-local] CONSUMED: gsd-validate-commit.sh fails CLOSED on the literal
+  # "gsd-node-runner: no usable node" — reword both together (its test pins it).
   echo "gsd-node-runner: no usable node found for $target (tried: $tried)" >&2
   # [gsd-local] Claude Code blocks only on exit 2, and on Stop/SubagentStop a
   # block means "keep going" — a missing node there would loop every stop.
