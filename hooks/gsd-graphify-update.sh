@@ -54,7 +54,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 # It must be an absolute path; anything else is rejected by the runner's
 # executable check, which then falls through to its own candidates.
 GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
-gsd_node() { sh "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
 
 # Gate 1 — tool_name == Bash; extract command
 INPUT=$(cat 2>/dev/null || true)

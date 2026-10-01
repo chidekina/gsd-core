@@ -46,6 +46,59 @@ trap cleanup_temp_files EXIT
 # bash below when building COMMIT_TYPES.
 BUILTIN_COMMIT_TYPES=(feat fix docs style refactor perf test build ci chore)
 
+# [gsd-local] every node call goes through the node runner, never a bare
+# `node`: under a minimal hook PATH a bare node fails with 127 at every site,
+# and each #3838 "could not run" branch below turned that into exit 0 — this
+# PreToolUse guard failed OPEN. The installer stamps the install-time node
+# here (as the JS hooks get it in their command); unstamped, the literal is
+# not an absolute path and the runner falls through to its fallbacks.
+# GSD_NODE (env, optional) overrides the baked node for this script only.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+GSD_NODE_BAKED={{GSD_NODE_TOKEN}}
+gsd_node() { "${BASH:-sh}" "$HOOK_DIR/gsd-node-runner.sh" "${GSD_NODE:-$GSD_NODE_BAKED}" "$@"; }
+
+# [gsd-local] Does config $1 enable this hook, decided WITHOUT node (used only when node is gone)?
+# python3 present and the JSON parses: exact (hooks.community === true, escapes decoded). Otherwise a
+# SUPERSET: the literal key, or ANY \uXXXX escape — a key written escaped could be "community", and
+# a guess here must fail closed (gsd-core#3 re-review, NIT-2). Here-strings, never `| grep -q`.
+# python3's verdicts are 10 (enabled) and 11 (not) ONLY: a python that cannot start exits 1 or 127,
+# and reading 1 as "not enabled" failed OPEN (gsd-core#3 second re-review, HIGH-1). Anything else
+# falls through to the grep superset.
+config_may_enable() {
+  local rc flat
+  if command -v python3 >/dev/null 2>&1; then
+    rc=0
+    python3 -c 'import json,sys
+try: c=json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception: sys.exit(12)
+h=c.get("hooks") if isinstance(c,dict) else None
+sys.exit(10 if isinstance(h,dict) and h.get("community") is True else 11)' "$1" 2>/dev/null || rc=$?
+    case "$rc" in 10) return 0 ;; 11) return 1 ;; esac
+  fi
+  flat=$(tr -d '\r\n' < "$1")
+  grep -q '"community"[[:space:]]*:[[:space:]]*true' <<< "$flat" || grep -q '\\u[0-9A-Fa-f]\{4\}' <<< "$flat"
+}
+
+# [gsd-local] May payload $1 carry a git commit, decided WITHOUT node? A SUPERSET of isGitSubcommand.
+# The command comes from tool_input.command via python3 when it can (so "commit" in cwd, description
+# or transcript_path does not block an `ls`, LOW-1); otherwise the raw payload. Quotes and backslashes
+# are removed first, the way bash removes them (`c'o'mmit`, `co""mmit`, `co\mmit` ARE commit, MEDIUM-1),
+# and a `$'` ANSI-C string or a JSON \u escape is undecidable here, so it counts as may-commit.
+command_may_commit() {
+  local text rc=0
+  text=$(python3 -c 'import json,sys
+c=json.load(sys.stdin).get("tool_input",{}).get("command","")
+if not isinstance(c,str): sys.exit(12)
+sys.stdout.write(c)' <<< "$1" 2>/dev/null) || rc=$?
+  [ "$rc" = 0 ] || text=$1
+  grep -q "\\\$'" <<< "$text" && return 0
+  grep -q '\\u[0-9A-Fa-f]\{4\}' <<< "$text" && return 0
+  text=$(tr -d "\"'\\\\" <<< "$text")
+  grep -q 'commit' <<< "$text"
+}
+
+INPUT=$(cat)
+
 # Check opt-in config — exit silently if not enabled
 if [ -f .planning/config.json ]; then
   ENABLED_ERR=$(mktemp)
@@ -56,7 +109,7 @@ if [ -f .planning/config.json ]; then
   # built below, so a configured value can never alter the compiled pattern's
   # structure.
   BUILTIN_COMMIT_TYPES_CSV=$(IFS=,; echo "${BUILTIN_COMMIT_TYPES[*]}")
-  CONFIG_OUT=$(GSD_BUILTIN_COMMIT_TYPES="$BUILTIN_COMMIT_TYPES_CSV" node -e "
+  CONFIG_OUT=$(GSD_BUILTIN_COMMIT_TYPES="$BUILTIN_COMMIT_TYPES_CSV" gsd_node -e "
     try{
       const c=require('./.planning/config.json');
       process.stdout.write(c.hooks?.community===true?'1':'0');
@@ -84,6 +137,24 @@ if [ -f .planning/config.json ]; then
   # silently accepting a non-conforming commit. Found by review of #4429.
   CONFIG_STATUS=${CONFIG_STATUS:-0}
   if [ "$CONFIG_STATUS" != "0" ]; then
+    # [gsd-local] FAIL CLOSED when node never RAN the inline script, in a project
+    # that enables this hook, on a command that may be a commit. The script
+    # writes CONFIG_READ_FAILED on every failure it handles, so a failure
+    # WITHOUT that marker came from before it: no node resolved, the runner file
+    # is missing (127), or a node that resolves but does not work (a shim with
+    # no version set). Operator decision 2026-10-01 (gsd-core#3 second
+    # re-review, MEDIUM-2): upstream #3838 fails open on these; a node that ran
+    # and reported CONFIG_READ_FAILED still does. Both shell checks are
+    # SUPERSETS of what node would decide (opt-in flag, isGitSubcommand).
+    # Here-strings, not `| grep -q`: under pipefail an early grep exit SIGPIPEs
+    # the producer and reads as no match.
+    if ! grep -q 'CONFIG_READ_FAILED' "$ENABLED_ERR" \
+      && config_may_enable .planning/config.json \
+      && command_may_commit "$INPUT"; then
+      cat "$ENABLED_ERR" >&2; echo >&2
+      echo "gsd-validate-commit.sh: node did not run the opt-in check (exit $CONFIG_STATUS) — commit blocked (fail closed). Set GSD_NODE to an absolute node path or reinstall GSD." >&2
+      exit 2
+    fi
     # Could not determine the opt-in flag at all (node missing, JSON parse
     # error other than absence, etc.) — distinct from ".planning/config.json
     # exists and legitimately disables the hook". Say so and pass, per #3838.
@@ -108,11 +179,9 @@ else
   exit 0
 fi
 
-INPUT=$(cat)
-
 # Extract command from JSON using Node (handles escaping correctly, no jq needed)
 CMD_ERR=$(mktemp)
-CMD=$(echo "$INPUT" | node -e "
+CMD=$(echo "$INPUT" | gsd_node -e "
   let d='';
   process.stdin.on('data',c=>d+=c);
   process.stdin.on('end',()=>{
@@ -143,9 +212,8 @@ fi
 # Delegates to hooks/lib/git-cmd.js isGitSubcommand() — the canonical token-walk
 # classifier that handles env-prefix, -C path, and full-path git invocations.
 # A naive `^git\s+commit` regex misses all three; this guard fixes that (#3129).
-HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLASSIFY_ERR=$(mktemp)
-GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" node -e "
+GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" gsd_node -e "
   try {
     const {isGitSubcommand}=require(process.env.GIT_CMD_LIB);
     process.exit(isGitSubcommand(process.argv[1],'commit')?0:1);
@@ -572,7 +640,7 @@ if [ "$CLASSIFY_STATUS" = "0" ]; then
     fi
 
     if [ "$RESOLVE" = 1 ]; then
-      SUBJECT=$(GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" MSG="$MSG" node -e "
+      SUBJECT=$(GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" MSG="$MSG" gsd_node -e "
         const {resolveCommitSubject}=require(process.env.GIT_CMD_LIB);
         process.stdout.write(resolveCommitSubject(process.env.MSG));
       " 2>/dev/null) || SUBJECT="${MSG%%$'\n'*}"
