@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripClosedMilestoneDetails, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { updateTableCell } from './markdown-table.cjs';
 import { clampPercent } from './phase-lifecycle.cjs';
@@ -273,7 +273,7 @@ function searchPhaseInContent(content: string, escapedPhase: string, phaseNum: s
  * Two-pass phase lookup that mirrors cmdRoadmapGetPhase's resolution strategy.
  *
  * Pass 1: current-milestone slice (extractCurrentMilestone).
- * Pass 2: full roadmap content (stripShippedMilestones) — covers cross-milestone
+ * Pass 2: full roadmap content (stripClosedMilestoneDetails) — covers cross-milestone
  *         and older frontend phases that are no longer in the current milestone slice.
  *
  * Returns the phase section string if found, null if ROADMAP.md is missing,
@@ -298,7 +298,9 @@ function getRoadmapPhaseWithFallback(cwd: string, phaseNum: string): string | nu
     throw err;
   }
   const milestoneContent = extractCurrentMilestone(rawContent, cwd);
-  const fullContent = stripShippedMilestones(rawContent);
+  // Strip only CLOSED milestone <details> blocks: an active milestone wrapped
+  // in a bare <details> (no `open`) still holds resolvable phases.
+  const fullContent = stripClosedMilestoneDetails(rawContent);
 
   // #2121/#2114: iterate the shared lookup-source list (exact → numeric →
   // prefix-tolerant) so this resolver matches getRoadmapPhaseInternal and a
@@ -333,7 +335,8 @@ function cmdRoadmapGetPhase(cwd: string, phaseNum: string, raw: boolean): void {
     const rawContent = fs.readFileSync(roadmapPath, 'utf-8');
     const milestoneContent = extractCurrentMilestone(rawContent, cwd);
 
-    const fullContent = stripShippedMilestones(rawContent);
+    // Strip only CLOSED milestone <details> blocks — see getRoadmapPhaseWithFallback.
+    const fullContent = stripClosedMilestoneDetails(rawContent);
     const convention = resolvePhaseIdConvention(cwd);
 
     // #2121/#2114: iterate the shared lookup-source list (exact → numeric →
@@ -733,7 +736,8 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // milestone, so this never claims COMPLETE — it converts silence into a
   // populated, flagged result.
   if (phases.length === 0 && scope !== SCOPE.COMPLETE && _phaseDirNames.length > 0) {
-    const fallbackContent = stripShippedMilestones(rawContent);
+    // Closed milestone blocks only — an active milestone in a bare <details> keeps its phases.
+    const fallbackContent = stripClosedMilestoneDetails(rawContent);
     const fallbackCollection = collectAnalyzePhases(fallbackContent, phasesDir, _phaseDirNames, convention);
     if (fallbackCollection.phases.length > 0) {
       collected = fallbackCollection;
