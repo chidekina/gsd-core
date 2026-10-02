@@ -1166,3 +1166,217 @@ Active milestone prose.
     assert.deepStrictEqual(out.phases.map((p) => p.number), ['99', '01']);
   });
 });
+
+describe('re-verification: closed words need a version + status position; first marker wins', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  const writeRoadmap = (body) => fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), body);
+  const run = (cmd) => {
+    const result = runGsdTools(cmd, tmpDir);
+    assert.ok(result.success, `${cmd} failed: ${result.error}`);
+    return JSON.parse(result.output);
+  };
+
+  // Active milestone that keeps its own finished phases in a collapsed block.
+  const activeWithCollapsed = (summary) => `# Roadmap
+
+## v1.7 Current
+
+<details>
+<summary>${summary}</summary>
+
+### Phase 1: One
+**Goal:** a
+
+### Phase 2: Two
+**Goal:** b
+
+</details>
+
+### Phase 3: Three
+**Goal:** c
+`;
+
+  test('MED-A: "Completed phases (1-2)" inside the active window stays (analyze + get-phase)', () => {
+    writeState(tmpDir, 'v1.7');
+    writeRoadmap(activeWithCollapsed('Completed phases (1-2)'));
+    assert.deepStrictEqual(run('roadmap analyze').phases.map((p) => p.number), ['1', '2', '3']);
+    assert.strictEqual(run('roadmap get-phase 1').found, true);
+  });
+
+  for (const summary of [
+    'v1.7 Current — Done criteria in phase 3',
+    'v1.7 Atual — Entregue parcialmente',
+    'Phase 3 done; Phase 4 next',
+    'v1.7 — next: Done-when list',
+  ]) {
+    test(`MED-A: a closed word outside a status position does not strip: "${summary}"`, () => {
+      writeState(tmpDir, 'v1.7');
+      writeRoadmap(activeWithCollapsed(summary));
+      assert.strictEqual(run('roadmap get-phase 1').found, true);
+      assert.strictEqual(run('roadmap get-phase 3').found, true, 'control: the window itself resolves');
+    });
+  }
+
+  test('MED-A: a closed word in status position WITHOUT a version token does not strip', () => {
+    writeState(tmpDir, 'v1.7');
+    writeRoadmap(activeWithCollapsed('Phases 1-2 — Done'));
+    assert.strictEqual(run('roadmap get-phase 1').found, true);
+  });
+
+  const shippedThenFuture = (summary) => `# Roadmap
+
+<details>
+<summary>${summary}</summary>
+
+### Phase 3: OLD shipped phase
+**Goal:** old
+
+</details>
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+## v1.16 Next
+
+### Phase 3: NEW future phase
+**Goal:** new
+`;
+
+  for (const summary of [
+    'v1.0 ✅ SHIPPED 2026-05-01 (started 2026-03)',
+    'v1.0 MVP — Shipped (started 2026-03)',
+  ]) {
+    test(`MED-1 residual: the first marker wins — "${summary}" is closed`, () => {
+      writeState(tmpDir, 'v1.15');
+      writeRoadmap(shippedThenFuture(summary));
+      assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
+    });
+  }
+
+  test('a versioned label ENDING in a closed word is closed ("v1.0 MVP Complete")', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(shippedThenFuture('v1.0 MVP Complete'));
+    assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
+  });
+
+  test('control: an active marker before a closed one keeps the block ("v1.7 In Progress — 40 ✅")', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(shippedThenFuture('v1.0 In Progress — 40 ✅ 41 ✅'));
+    assert.strictEqual(run('roadmap get-phase 3').phase_name, 'OLD shipped phase');
+  });
+
+  test('LOW-B: no milestone in STATE — analyze lists a phase inside a bare 🚧 <details>', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nstatus: executing\n---\n');
+    writeRoadmap(`# Roadmap
+
+<details>
+<summary>✅ v1.0 MVP — SHIPPED 2026-05-01</summary>
+
+### Phase 1: Old
+**Goal:** old
+
+</details>
+
+<details>
+<summary>🚧 v1.1 Next (In Progress)</summary>
+
+## v1.1 Next
+
+### Phase 2: Active
+**Goal:** a
+
+</details>
+`);
+    const nums = run('roadmap analyze').phases.map((p) => p.number);
+    assert.deepStrictEqual(nums, ['2'], 'active collapsed phase listed, shipped one not');
+    assert.strictEqual(run('roadmap get-phase 2').found, true, 'control: get-phase agrees');
+  });
+
+  const activeCollapsedNoMarker = `# Roadmap
+
+<details>
+<summary>🚧 v1.1 Next (In Progress)</summary>
+
+## v1.1 Next
+
+### Phase 2: Active
+**Goal:** a
+
+</details>
+`;
+
+  test('LOW-B: a STATE milestone with no matching heading — analyze still lists the bare 🚧 <details> phase', () => {
+    writeState(tmpDir, 'v9.9');
+    writeRoadmap(activeCollapsedNoMarker);
+    assert.deepStrictEqual(run('roadmap analyze').phases.map((p) => p.number), ['2']);
+  });
+
+  test('NIT: a </details> inside a code fence does not end a shipped block early', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(`# Roadmap
+
+<details>
+<summary>✅ v1.0 MVP — SHIPPED 2026-05-01</summary>
+
+\`\`\`html
+</details>
+\`\`\`
+
+### Phase 3: OLD leaked
+**Goal:** old
+
+</details>
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+## v1.16 Next
+
+### Phase 3: NEW future phase
+**Goal:** new
+`);
+    assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
+  });
+
+  test('NIT: a <details> opener inside a code fence does not swallow the phases after it', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(`# Roadmap
+
+## v1.15 Current
+
+\`\`\`html
+<details>
+<summary>example</summary>
+\`\`\`
+
+### Phase 7: Real
+**Goal:** r
+
+<details>
+<summary>✅ v1.0 MVP — SHIPPED 2026-05-01</summary>
+
+### Phase 1: Old
+**Goal:** old
+
+</details>
+
+### Phase 8: After
+**Goal:** after
+`);
+    assert.strictEqual(run('roadmap get-phase 8').found, true);
+    assert.strictEqual(run('roadmap get-phase 1').found, false, 'the shipped block is still stripped');
+  });
+});

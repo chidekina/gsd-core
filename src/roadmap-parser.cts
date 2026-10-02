@@ -92,24 +92,72 @@ function stripShippedMilestones(content: string): string {
 }
 
 /**
- * Summary-only milestone vocabulary. A `<summary>` is a one-line label, so its
- * LEADING token is the author's verdict: `✅ v1.0 … (started 2026-03)` is a
- * shipped milestone that mentions a start date, while `🚧 v1.7 … (40 ✅ 41 ✅)`
- * is an active milestone that counts its finished phases. The heading
- * classifier (`isClosedMilestoneHeading`) lets any active word win, which is
- * right for headings and wrong for these labels — so summaries get their own
- * rule instead of a change to the shared heading predicate.
+ * Summary-only milestone verdict. A `<summary>` is a one-line label, and the
+ * FIRST status marker in it is the author's verdict: `v1.0 ✅ SHIPPED … (started
+ * 2026-03)` is a shipped milestone that mentions a start date, while
+ * `🚧 v1.7 … (40 ✅ 41 ✅)` is an active milestone counting its finished phases.
+ * The heading classifier (`isClosedMilestoneHeading`) lets any active word win,
+ * which is right for headings and wrong for these labels — so summaries get
+ * their own rule instead of a change to the shared heading predicate.
+ *
+ * Plain closed WORDS (Complete/Done/Entregue/Concluída) are weaker evidence
+ * than ✅/SHIPPED: "Completed phases (1-2)" or "— Done criteria in phase 3"
+ * label content INSIDE an active milestone. They count only when the label
+ * names a milestone version (`v1.7`) and the word sits in a status position —
+ * after `—`/`–`/`-`/`(`/`:` and ending the status phrase, or as the label's
+ * last word.
  */
-const SUMMARY_LEADING_CLOSED_PATTERN = /^(?:✅|🗄|SHIPPED\b|ARCHIVED\b|CLOSED\b)/i;
-const SUMMARY_LEADING_ACTIVE_PATTERN = /^(?:🚧|🔄)/;
-const SUMMARY_CLOSED_WORD_PATTERN = /\b(?:COMPLETED?|DONE|ENTREGUE)\b|\bCONCLU[IÍií]D[AOao]\b/i;
+const SUMMARY_VERSION_PATTERN = /\bv\d+(?:\.\d+)+/i;
+const SUMMARY_CLOSED_WORD = '(?:COMPLETED?|DONE|ENTREGUE|CONCLU[IÍií]D[AOao])';
+const SUMMARY_CLOSED_WORD_PATTERN = new RegExp(
+  // after a status separator and ending the status phrase: "v1.0 — Complete (Phases 1-4)"
+  `(?:[—–(:]|\\s-)\\s*${SUMMARY_CLOSED_WORD}(?=\\s*(?:$|[)\\]—–,;·|]|\\d))`
+  // or the last word of the label: "v1.0 MVP Complete"
+  + `|\\s${SUMMARY_CLOSED_WORD}\\s*$`,
+  'i',
+);
+
+function firstMatchIndex(pattern: RegExp, text: string): number {
+  const m = pattern.exec(text);
+  return m ? m.index : -1;
+}
 
 function isClosedMilestoneSummary(summaryHtml: string): boolean {
-  const text = summaryHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-  if (SUMMARY_LEADING_CLOSED_PATTERN.test(text)) return true;
-  if (SUMMARY_LEADING_ACTIVE_PATTERN.test(text)) return false;
-  if (MILESTONE_ACTIVE_MARKER_PATTERN.test(text)) return false;
-  return MILESTONE_CLOSED_MARKER_PATTERN.test(text) || SUMMARY_CLOSED_WORD_PATTERN.test(text);
+  const text = summaryHtml
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const closedCandidates = [firstMatchIndex(MILESTONE_CLOSED_MARKER_PATTERN, text)];
+  if (SUMMARY_VERSION_PATTERN.test(text)) {
+    closedCandidates.push(firstMatchIndex(SUMMARY_CLOSED_WORD_PATTERN, text));
+  }
+  const closedAt = Math.min(...closedCandidates.map((i) => (i === -1 ? Infinity : i)));
+  if (closedAt === Infinity) return false;
+  const activeAt = firstMatchIndex(MILESTONE_ACTIVE_MARKER_PATTERN, text);
+  return activeAt === -1 || closedAt < activeAt;
+}
+
+/**
+ * Character ranges covered by fenced code blocks (``` or ~~~ opening a line).
+ * A `<details>` tag shown as an example inside a fence is text, not structure.
+ * An unterminated fence runs to end of document, as CommonMark renders it.
+ */
+function fencedCodeRanges(content: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const fenceLine = /^[ ]{0,3}(`{3,}|~{3,})/gm;
+  let open: { at: number; marker: string } | null = null;
+  for (const m of content.matchAll(fenceLine)) {
+    const at = m.index ?? 0;
+    const marker = m[1];
+    if (!open) {
+      open = { at, marker };
+    } else if (marker[0] === open.marker[0] && marker.length >= open.marker.length) {
+      ranges.push([open.at, at + m[0].length]);
+      open = null;
+    }
+  }
+  if (open) ranges.push([open.at, content.length]);
+  return ranges;
 }
 
 /**
@@ -120,11 +168,14 @@ function isClosedMilestoneSummary(summaryHtml: string): boolean {
  * reproduce the phase_count: 0 class of #557/#2947.
  *
  * Blocks are matched depth-balanced, so a `<details>` nested inside a shipped
- * block does not end the shipped block early and leak the phases after it. A
- * block without a `<summary>` is kept; so is an unterminated one. `<details
- * open>` is classified by its summary like any other block.
+ * block does not end the shipped block early and leak the phases after it, and
+ * `<details>`/`</details>` inside fenced code are ignored. A block without a
+ * `<summary>` is kept; so is an unterminated one. `<details open>` is
+ * classified by its summary like any other block.
  */
 function stripClosedMilestoneDetails(content: string): string {
+  const fences = fencedCodeRanges(content);
+  const inFence = (idx: number): boolean => fences.some(([a, b]) => idx >= a && idx < b);
   const tag = /<(\/?)details\b[^>]*>/gi;
   let out = '';
   let cursor = 0;
@@ -132,6 +183,7 @@ function stripClosedMilestoneDetails(content: string): string {
   let blockStart = -1;
   for (const m of content.matchAll(tag)) {
     const idx = m.index ?? 0;
+    if (inFence(idx)) continue;
     if (m[1] !== '/') {
       if (depth === 0) blockStart = idx;
       depth++;
@@ -1070,7 +1122,8 @@ function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: strin
   const versionedMilestonesPresent = hasVersionedMilestones(content);
 
   if (!version) {
-    const value = stripShippedMilestones(content);
+    // Summary-aware: an active milestone in a bare <details> keeps its phases.
+    const value = stripClosedMilestoneDetails(content);
     return {
       value,
       scope: classifyMilestoneWindow({
@@ -1160,7 +1213,7 @@ function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: strin
         };
       }
     }
-    const value = stripShippedMilestones(content);
+    const value = stripClosedMilestoneDetails(content);
     return {
       value,
       scope: classifyMilestoneWindow({
