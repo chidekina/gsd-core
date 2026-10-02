@@ -83,8 +83,10 @@ node gsd-tools.cjs state load
 # instead of key: value pairs, or an unclosed `---` fence), the output
 # carries `frontmatter_error` and curated fields fall back to body-derived
 # values. `state load`, `state get` and `state-snapshot` carry the same key;
-# `state validate` reports it as S010. With --raw (plain text, no JSON key)
-# the state verbs print `frontmatter_error: <message>` on stderr; exit stays 0.
+# `state validate` reports it as S010. With --raw, `state load`, `state get`
+# and `state-snapshot` print plain text that cannot carry the key, so they
+# print `frontmatter_error: <message>` on stderr; exit stays 0. (`state json
+# --raw` is still JSON and keeps the key in stdout.)
 # Asymmetry: `frontmatter get` reports only invalid YAML, as `error`; the
 # state verbs report all three cases, as `frontmatter_error`.
 node gsd-tools.cjs state json
