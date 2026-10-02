@@ -964,6 +964,54 @@ describe('state read verbs surface unusable frontmatter as frontmatter_error', (
     assert.ok(!out.warnings.some((w) => w.code === 'S010'), JSON.stringify(out.warnings));
   });
 
+  // --raw prints plain text, so the in-band key cannot travel; the diagnostic goes to stderr
+  // (exit stays 0 so existing `$(… --raw)` callers keep working).
+  const runRaw = (args) => {
+    const { spawnSync } = require('child_process');
+    const { TOOLS_PATH } = require('./helpers.cjs');
+    const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+    const env = { ...process.env };
+    delete env.GSD_PROJECT;
+    delete env.GSD_WORKSTREAM;
+    return spawnSync(process.execPath, [TOOLS_PATH, ...args], { cwd: tmpDir, encoding: 'utf-8', env, timeout: PROBE_TIMEOUT_MS });
+  };
+  for (const args of [['state', 'get', 'Status', '--raw'], ['state', 'load', '--raw'], ['state', 'get', '--raw']]) {
+    test(`${args.join(' ')}: unusable frontmatter is reported on stderr, exit 0`, () => {
+      writeStateMd(BAD_QUOTE);
+      const r = runRaw(args);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.ok(r.stderr.includes('frontmatter_error'), `stderr must name frontmatter_error; got: ${r.stderr}`);
+      assert.ok(r.stderr.includes(frontmatterLib.FRONTMATTER_UNPARSEABLE_MESSAGE), r.stderr);
+      assert.ok(!r.stdout.includes('frontmatter_error'), 'stdout stays the plain raw value');
+    });
+    test(`control: ${args.join(' ')} — valid frontmatter writes no frontmatter_error to stderr`, () => {
+      writeStateMd(VALID);
+      const r = runRaw(args);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.ok(r.stdout.length > 0, 'the raw value is still printed');
+      assert.ok(!r.stderr.includes('frontmatter_error'), r.stderr);
+    });
+  }
+
+  test('documented edge: `~` alone is a string under the FAILSAFE schema, so it is not a mapping', () => {
+    writeStateMd('---\n~\n---\n\n# Project State\n');
+    assert.strictEqual(json('state json').frontmatter_error, frontmatterLib.FRONTMATTER_NOT_MAPPING_MESSAGE);
+  });
+
+  test('documented edge: a thematic break, prose, then a second `---` reads as a scalar frontmatter block', () => {
+    writeStateMd('---\nSome intro prose.\n---\n\n# Project State\n');
+    assert.strictEqual(json('state json').frontmatter_error, frontmatterLib.FRONTMATTER_NOT_MAPPING_MESSAGE);
+  });
+
+  test('workflows/new-milestone.md does not discard stderr of the raw milestone read', () => {
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'new-milestone.md'), 'utf-8');
+    const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+    const line = splitLines(md).find((l) => l.includes('state.get milestone --raw'));
+    assert.ok(line, 'the outgoing-milestone read must exist');
+    assert.ok(!line.includes('2>/dev/null'), `stderr must reach the workflow: ${line}`);
+    assert.ok(md.includes('frontmatter_error'), 'the workflow must say what to do with it');
+  });
+
   test('workflows/next.md stops on frontmatter_error before routing', () => {
     const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'next.md'), 'utf-8');
     const start = md.indexOf('gsd_run query state.json');

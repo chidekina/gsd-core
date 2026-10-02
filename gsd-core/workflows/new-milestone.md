@@ -204,11 +204,15 @@ blockers, todos) is preserved across the switch — symmetric with
 
 ```bash
 GSD_WS_ARG=$(cat .planning/.gsd-ws-arg 2>/dev/null || true)
-OUTGOING_MILESTONE=$(gsd_run query state.get milestone --raw $GSD_WS_ARG 2>/dev/null || true)
+OUTGOING_MILESTONE=$(gsd_run query state.get milestone --raw $GSD_WS_ARG || true)
 printf '%s' "$OUTGOING_MILESTONE" > .planning/.gsd-outgoing-milestone 2>/dev/null || true
 echo "Outgoing milestone (phase history archives under THIS version in step 6): ${OUTGOING_MILESTONE:-<unknown>}"
 gsd_run query state.milestone-switch --milestone "v[X.Y]" --name "[Name]" $GSD_WS_ARG
 ```
+
+**If that read printed `frontmatter_error:` on stderr, STOP** and report it: STATE.md's
+frontmatter could not be read, so the captured outgoing version is unreliable (it may be raw
+line text). Fix the frontmatter before switching milestones.
 
 **Capture the outgoing version now.** The lines above read the *current* (previous) milestone
 version BEFORE the switch flips STATE.md's `milestone:` field to the new one, and persist it to

@@ -765,7 +765,11 @@ function extractFrontmatter(content: string, sourcePath?: string): Frontmatter {
  *    → FRONTMATTER_UNTERMINATED_MESSAGE (the same shape guard as the stderr warning, so a
  *    document that merely opens with a thematic break stays silent)
  *
- * No fence, empty fences, and whitespace-only fences are not errors. Pure; never throws.
+ * No fence, empty fences, and whitespace- or comment-only fences are not errors (they parse
+ * to nothing). Two consequences of the FAILSAFE schema, documented rather than special-cased:
+ * a lone `~` is the STRING "~" there, not null, so it reports as not-a-mapping; and a
+ * document that opens with a thematic break, then prose, then a second `---` is a fenced
+ * block holding a scalar, so it reports as not-a-mapping too. Pure; never throws.
  */
 function frontmatterDiagnostic(content: string): string | null {
   const found = frontmatterRegion(content);

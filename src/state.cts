@@ -67,10 +67,16 @@ function isUnparseableFrontmatter(existingFm: Record<string, unknown>): boolean 
  * `frontmatter get` reports for the YAML-syntax case. Additive: the key is absent when the
  * frontmatter is fine or absent, and `error` keeps its existing meaning on every verb.
  * In-band rather than stderr because `workflows/next.md` discards stderr.
+ *
+ * `--raw` prints a bare value, which cannot carry the key, so in raw mode the same
+ * diagnostic is ALSO written to stderr as `frontmatter_error: <message>`. Exit status is
+ * unchanged (0), so existing `$(… --raw)` captures keep working.
  */
-function withFrontmatterError<T extends object>(result: T, content: string): T & { frontmatter_error?: string } {
+function withFrontmatterError<T extends object>(result: T, content: string, raw = false): T & { frontmatter_error?: string } {
   const diagnostic = frontmatterDiagnostic(content);
-  return diagnostic ? { ...result, frontmatter_error: diagnostic } : result;
+  if (!diagnostic) return result;
+  if (raw) process.stderr.write(`frontmatter_error: ${diagnostic} (STATE.md)\n`);
+  return { ...result, frontmatter_error: diagnostic };
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import scanPhasePlans = require('./plan-scan.cjs');
@@ -558,6 +564,8 @@ function cmdStateLoad(cwd: string, raw: boolean): void {
     debug_dir: toPosixPath(paths.debug),
   };
 
+  const withDiagnostic = withFrontmatterError(result, stateRaw, raw);
+
   // For --raw, output a condensed key=value format
   if (raw) {
     const c = config as Record<string, string | boolean | undefined>;
@@ -579,7 +587,7 @@ function cmdStateLoad(cwd: string, raw: boolean): void {
     throw new ExitError(0);
   }
 
-  output(withFrontmatterError(result, stateRaw), false, undefined);
+  output(withDiagnostic, false, undefined);
 }
 
 function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): void {
@@ -592,7 +600,7 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
   {
 
     if (!section) {
-      output(withFrontmatterError({ content }, content), raw, content);
+      output(withFrontmatterError({ content }, content, raw), raw, content);
       return;
     }
 
@@ -603,7 +611,7 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
     const boldPattern = new RegExp(`^[ \\t]*\\*\\*${fieldEscaped}:\\*\\*[ \\t]*(.*)`, 'im');
     const boldMatch = content.match(boldPattern);
     if (boldMatch) {
-      output(withFrontmatterError({ [section]: boldMatch[1].trim() }, content), raw, boldMatch[1].trim());
+      output(withFrontmatterError({ [section]: boldMatch[1].trim() }, content, raw), raw, boldMatch[1].trim());
       return;
     }
 
@@ -611,7 +619,7 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
     const plainPattern = new RegExp(`^${fieldEscaped}:\\s*(.*)`, 'im');
     const plainMatch = content.match(plainPattern);
     if (plainMatch) {
-      output(withFrontmatterError({ [section]: plainMatch[1].trim() }, content), raw, plainMatch[1].trim());
+      output(withFrontmatterError({ [section]: plainMatch[1].trim() }, content, raw), raw, plainMatch[1].trim());
       return;
     }
 
@@ -619,11 +627,11 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
     const sectionPattern = new RegExp(`##\\s*${fieldEscaped}\\s*\n([\\s\\S]*?)(?=\\n##|$)`, 'i');
     const sectionMatch = content.match(sectionPattern);
     if (sectionMatch) {
-      output(withFrontmatterError({ [section]: sectionMatch[1].trim() }, content), raw, sectionMatch[1].trim());
+      output(withFrontmatterError({ [section]: sectionMatch[1].trim() }, content, raw), raw, sectionMatch[1].trim());
       return;
     }
 
-    output(withFrontmatterError({ error: `Section or field "${section}" not found` }, content), raw, '');
+    output(withFrontmatterError({ error: `Section or field "${section}" not found` }, content, raw), raw, '');
   }
 }
 
@@ -2580,7 +2588,7 @@ function cmdStateSnapshot(cwd: string, raw: boolean): void {
     session,
   };
 
-  output(withFrontmatterError(result, content), raw, undefined);
+  output(withFrontmatterError(result, content, raw), raw, undefined);
 }
 
 // ─── State Frontmatter Sync ──────────────────────────────────────────────────
