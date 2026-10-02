@@ -32,7 +32,7 @@ const { installerEnv } = require('./helpers/install-shared.cjs');
 const { buildOverlayRepo } = require('./helpers/overlay-repo.cjs');
 const { ensureHooksDist } = require('./helpers/hooks-dist.cjs');
 const { BUILD_TIMEOUT_MS, INSTALL_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
-const { HOOKS_TO_COPY, HOOKS_SUBDIRS_TO_COPY } = require('../scripts/build-hooks.js');
+const { HOOKS_TO_COPY, HOOKS_SUBDIRS_TO_COPY, pruneStale } = require('../scripts/build-hooks.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -195,6 +195,53 @@ describe('build-hooks: pruning is best-effort, never fails the build', () => {
     assert.equal(result.exitCode, 0, `build must not fail on a prune error: ${result.stderr}`);
     // Control: the rm really was refused, so the arm exercised the error path.
     assert.ok(fs.existsSync(path.join(locked, 'x.js')), 'control: the locked stale file is still there');
-    assert.match(result.stdout + result.stderr, /stale-locked/, 'the failed prune is reported');
+    assert.match(result.stdout + result.stderr, /could not remove stale stale-locked/, 'the failed prune is reported');
+  });
+});
+
+describe('build-hooks: prune keeps a case-only alias of a shipped file', () => {
+  let dir;
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-dist-fresh-case-')); });
+  after(() => { cleanup(dir); });
+
+  // On a case-insensitive FS (macOS/Windows) a hook renamed only by case can
+  // still be listed under its old-case name after the build writes it, and
+  // that name IS the shipped file. Simulated here with a same-inode alias.
+  test('same-inode case variant survives; a distinct stale file is removed', () => {
+    fs.writeFileSync(path.join(dir, 'gsd-hook.js'), '// shipped\n');
+    fs.linkSync(path.join(dir, 'gsd-hook.js'), path.join(dir, 'GSD-Hook.js'));
+    // Twin exists as a separate file, so the inode comparison really runs.
+    fs.writeFileSync(path.join(dir, 'gsd-other.js'), '// shipped\n');
+    fs.writeFileSync(path.join(dir, 'Gsd-Other.js'), '// stale, different file\n');
+
+    pruneStale(dir, new Set(['gsd-hook.js', 'gsd-other.js']));
+
+    assert.ok(fs.existsSync(path.join(dir, 'GSD-Hook.js')), 'case-only alias of the shipped file must not be pruned');
+    // Control: a case variant that is a DIFFERENT file is still stale.
+    assert.ok(!fs.existsSync(path.join(dir, 'Gsd-Other.js')), 'a different-inode case variant is pruned');
+    assert.ok(fs.existsSync(path.join(dir, 'gsd-hook.js')), 'control: the shipped file is intact');
+  });
+});
+
+describe('build-hooks: a stale listed entry that is a directory', () => {
+  let root;
+  before(() => { root = stageBuildFixture(); });
+  after(() => { cleanup(root); });
+
+  test('dist/<hook> as a directory with no source is removed and the build exits 0', () => {
+    const victim = HOOKS_TO_COPY.find((h) => h.endsWith('.js'));
+    const dist = path.join(root, 'hooks', 'dist');
+    fs.mkdirSync(path.join(dist, victim), { recursive: true });
+    fs.writeFileSync(path.join(dist, victim, 'x'), 'stale\n');
+    fs.unlinkSync(path.join(root, 'hooks', victim));
+
+    const result = runNode([path.join(root, 'scripts', 'build-hooks.js')], {
+      cwd: root,
+      timeoutMs: BUILD_TIMEOUT_MS,
+    });
+    assert.equal(result.exitCode, 0, `build must not fail on a stale directory: ${result.stderr}`);
+    assert.ok(!fs.existsSync(path.join(dist, victim)), `stale dist/${victim}/ must not survive its source`);
+    const others = HOOKS_TO_COPY.filter((h) => h !== victim);
+    for (const h of others) assert.ok(fs.existsSync(path.join(dist, h)), `control: ${h} should be built`);
   });
 });
