@@ -1270,6 +1270,37 @@ describe('re-verification: closed words need a version + status position; first 
     assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
   });
 
+  for (const summary of [
+    'v1.0 MVP — Complete (Phases 1-4)',
+    'v1.0 MVP — Completed (2026-03-01)',
+    'v1.0 — Completed (started 2026-03)',
+  ]) {
+    test(`round 4: a closed word followed by a parenthetical is closed — "${summary}"`, () => {
+      writeState(tmpDir, 'v1.15');
+      writeRoadmap(shippedThenFuture(summary));
+      assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
+      assert.strictEqual(run('init plan-phase 3').phase_name, 'NEW future phase');
+    });
+  }
+
+  test('round 4 control: no separator before the word — "v1.0 Completed (started 2026-03)" stays active', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(shippedThenFuture('v1.0 Completed (started 2026-03)'));
+    assert.strictEqual(run('roadmap get-phase 3').phase_name, 'OLD shipped phase');
+  });
+
+  for (const summary of [
+    'v1.0 — EM ANDAMENTO (40 ✅ 41 ✅)',
+    'v1.0 — ATIVA · 40 ✅',
+    'v1.0 — PLANEJADA (✅ escopo aprovado)',
+  ]) {
+    test(`round 4: a PT-BR active word before ✅ keeps the block — "${summary}"`, () => {
+      writeState(tmpDir, 'v1.15');
+      writeRoadmap(shippedThenFuture(summary));
+      assert.strictEqual(run('roadmap get-phase 3').phase_name, 'OLD shipped phase');
+    });
+  }
+
   test('control: an active marker before a closed one keeps the block ("v1.7 In Progress — 40 ✅")', () => {
     writeState(tmpDir, 'v1.15');
     writeRoadmap(shippedThenFuture('v1.0 In Progress — 40 ✅ 41 ✅'));

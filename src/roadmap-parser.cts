@@ -105,13 +105,18 @@ function stripShippedMilestones(content: string): string {
  * label content INSIDE an active milestone. They count only when the label
  * names a milestone version (`v1.7`) and the word sits in a status position —
  * after `—`/`–`/`-`/`(`/`:` and ending the status phrase, or as the label's
- * last word.
+ * last word. A parenthetical may follow ("— Complete (Phases 1-4)").
+ *
+ * Summaries also recognise the PT-BR status words real roadmaps use without an emoji
+ * (EM ANDAMENTO / ATIVA / PLANEJADA) as non-closed markers, so "v1.7 — EM ANDAMENTO
+ * (40 ✅ 41 ✅)" stays active under first-marker-wins.
  */
+const SUMMARY_ACTIVE_PT_PATTERN = /\b(?:EM ANDAMENTO|ATIVA|PLANEJADA)\b/i;
 const SUMMARY_VERSION_PATTERN = /\bv\d+(?:\.\d+)+/i;
 const SUMMARY_CLOSED_WORD = '(?:COMPLETED?|DONE|ENTREGUE|CONCLU[IÍií]D[AOao])';
 const SUMMARY_CLOSED_WORD_PATTERN = new RegExp(
   // after a status separator and ending the status phrase: "v1.0 — Complete (Phases 1-4)"
-  `(?:[—–(:]|\\s-)\\s*${SUMMARY_CLOSED_WORD}(?=\\s*(?:$|[)\\]—–,;·|]|\\d))`
+  `(?:[—–(:]|\\s-)\\s*${SUMMARY_CLOSED_WORD}(?=\\s*(?:$|[()\\]—–,;·|]|\\d))`
   // or the last word of the label: "v1.0 MVP Complete"
   + `|\\s${SUMMARY_CLOSED_WORD}\\s*$`,
   'i',
@@ -133,8 +138,12 @@ function isClosedMilestoneSummary(summaryHtml: string): boolean {
   }
   const closedAt = Math.min(...closedCandidates.map((i) => (i === -1 ? Infinity : i)));
   if (closedAt === Infinity) return false;
-  const activeAt = firstMatchIndex(MILESTONE_ACTIVE_MARKER_PATTERN, text);
-  return activeAt === -1 || closedAt < activeAt;
+  const activeAt = Math.min(
+    ...[MILESTONE_ACTIVE_MARKER_PATTERN, SUMMARY_ACTIVE_PT_PATTERN]
+      .map((pattern) => firstMatchIndex(pattern, text))
+      .map((i) => (i === -1 ? Infinity : i)),
+  );
+  return closedAt < activeAt; // no active marker → activeAt is Infinity
 }
 
 /**
