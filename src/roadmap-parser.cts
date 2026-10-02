@@ -92,18 +92,127 @@ function stripShippedMilestones(content: string): string {
 }
 
 /**
+ * Summary-only milestone verdict. A `<summary>` is a one-line label, and the
+ * FIRST status marker in it is the author's verdict: `v1.0 ✅ SHIPPED … (started
+ * 2026-03)` is a shipped milestone that mentions a start date, while
+ * `🚧 v1.7 … (40 ✅ 41 ✅)` is an active milestone counting its finished phases.
+ * The heading classifier (`isClosedMilestoneHeading`) lets any active word win,
+ * which is right for headings and wrong for these labels — so summaries get
+ * their own rule instead of a change to the shared heading predicate.
+ *
+ * Plain closed WORDS (Complete/Done/Entregue/Concluída) are weaker evidence
+ * than ✅/SHIPPED: "Completed phases (1-2)" or "— Done criteria in phase 3"
+ * label content INSIDE an active milestone. They count only when the label
+ * names a milestone version (`v1.7`) and the word sits in a status position —
+ * after `—`/`–`/`-`/`(`/`:` and ending the status phrase, or as the label's
+ * last word. A parenthetical may follow ("— Complete (Phases 1-4)").
+ *
+ * Summaries also recognise the PT-BR status words real roadmaps use without an emoji
+ * (EM ANDAMENTO / ATIVA / PLANEJADA) as non-closed markers, so "v1.7 — EM ANDAMENTO
+ * (40 ✅ 41 ✅)" stays active under first-marker-wins.
+ */
+// Accent-aware word guards: JS `\b` without the `u` flag treats `ç`/`ã` as non-word, so
+// `\bATIVA\b` would match inside "Ativação".
+const SUMMARY_ACTIVE_PT_PATTERN = /(?<![\wÀ-ÿ])(?:EM ANDAMENTO|ATIVA|PLANEJADA)(?![\wÀ-ÿ])/i;
+const SUMMARY_VERSION_PATTERN = /\bv\d+(?:\.\d+)+/i;
+const SUMMARY_CLOSED_WORD = '(?:COMPLETED?|DONE|ENTREGUE|CONCLU[IÍií]D[AOao])';
+const SUMMARY_CLOSED_WORD_PATTERN = new RegExp(
+  // after a status separator and ending the status phrase: "v1.0 — Complete (Phases 1-4)"
+  `(?:[—–(:]|\\s-)\\s*${SUMMARY_CLOSED_WORD}(?=\\s*(?:$|[()\\]—–,;·|]|\\d))`
+  // or the last word of the label: "v1.0 MVP Complete"
+  + `|\\s${SUMMARY_CLOSED_WORD}\\s*$`,
+  'i',
+);
+
+function firstMatchIndex(pattern: RegExp, text: string): number {
+  const m = pattern.exec(text);
+  return m ? m.index : -1;
+}
+
+function isClosedMilestoneSummary(summaryHtml: string): boolean {
+  const text = summaryHtml
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const closedCandidates = [firstMatchIndex(MILESTONE_CLOSED_MARKER_PATTERN, text)];
+  if (SUMMARY_VERSION_PATTERN.test(text)) {
+    closedCandidates.push(firstMatchIndex(SUMMARY_CLOSED_WORD_PATTERN, text));
+  }
+  const closedAt = Math.min(...closedCandidates.map((i) => (i === -1 ? Infinity : i)));
+  if (closedAt === Infinity) return false;
+  const activeAt = Math.min(
+    ...[MILESTONE_ACTIVE_MARKER_PATTERN, SUMMARY_ACTIVE_PT_PATTERN]
+      .map((pattern) => firstMatchIndex(pattern, text))
+      .map((i) => (i === -1 ? Infinity : i)),
+  );
+  return closedAt < activeAt; // no active marker → activeAt is Infinity
+}
+
+/**
+ * Character ranges covered by fenced code blocks (``` or ~~~ opening a line).
+ * A `<details>` tag shown as an example inside a fence is text, not structure.
+ * An unterminated fence runs to end of document, as CommonMark renders it.
+ */
+function fencedCodeRanges(content: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const fenceLine = /^[ ]{0,3}(`{3,}|~{3,})/gm;
+  let open: { at: number; marker: string } | null = null;
+  for (const m of content.matchAll(fenceLine)) {
+    const at = m.index ?? 0;
+    const marker = m[1];
+    if (!open) {
+      open = { at, marker };
+    } else if (marker[0] === open.marker[0] && marker.length >= open.marker.length) {
+      ranges.push([open.at, at + m[0].length]);
+      open = null;
+    }
+  }
+  if (open) ranges.push([open.at, content.length]);
+  return ranges;
+}
+
+/**
  * #3982: strip only <details> blocks whose <summary> marks a CLOSED milestone
- * (ARCHIVED/SHIPPED/✅/… without an active marker) — the narrow form of
- * stripShippedMilestones the current-milestone window needs. A blanket strip
+ * (see `isClosedMilestoneSummary`) — the narrow form of stripShippedMilestones
+ * the current-milestone window and the get-phase readers need. A blanket strip
  * would delete the ACTIVE milestone's own collapsed blocks (#1341) and
  * reproduce the phase_count: 0 class of #557/#2947.
+ *
+ * Blocks are matched depth-balanced, so a `<details>` nested inside a shipped
+ * block does not end the shipped block early and leak the phases after it, and
+ * `<details>`/`</details>` inside fenced code are ignored. A block without a
+ * `<summary>` is kept; so is an unterminated one. `<details open>` is
+ * classified by its summary like any other block.
  */
 function stripClosedMilestoneDetails(content: string): string {
-  return content.replace(/<details\b[^>]*>[\s\S]*?<\/details>/gi, (block) => {
-    const summaryMatch = block.match(/<summary[^>]*>([^<]*)<\/summary>/i);
-    if (!summaryMatch) return block;
-    return isClosedMilestoneHeading(summaryMatch[1]) ? '' : block;
-  });
+  const fences = fencedCodeRanges(content);
+  const inFence = (idx: number): boolean => fences.some(([a, b]) => idx >= a && idx < b);
+  const tag = /<(\/?)details\b[^>]*>/gi;
+  let out = '';
+  let cursor = 0;
+  let depth = 0;
+  let blockStart = -1;
+  for (const m of content.matchAll(tag)) {
+    const idx = m.index ?? 0;
+    if (inFence(idx)) continue;
+    if (m[1] !== '/') {
+      if (depth === 0) blockStart = idx;
+      depth++;
+      continue;
+    }
+    if (depth === 0) continue; // stray close tag: leave it in place
+    depth--;
+    if (depth !== 0) continue;
+    const blockEnd = idx + m[0].length;
+    const block = content.slice(blockStart, blockEnd);
+    const openEnd = block.indexOf('>') + 1;
+    const summaryMatch = block.slice(openEnd).match(/^\s*<summary[^>]*>([\s\S]*?)<\/summary>/i);
+    if (summaryMatch && isClosedMilestoneSummary(summaryMatch[1])) {
+      out += content.slice(cursor, blockStart);
+      cursor = blockEnd;
+    }
+  }
+  return out + content.slice(cursor);
 }
 
 /**
@@ -1024,7 +1133,8 @@ function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: strin
   const versionedMilestonesPresent = hasVersionedMilestones(content);
 
   if (!version) {
-    const value = stripShippedMilestones(content);
+    // Summary-aware: an active milestone in a bare <details> keeps its phases.
+    const value = stripClosedMilestoneDetails(content);
     return {
       value,
       scope: classifyMilestoneWindow({
@@ -1114,7 +1224,7 @@ function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: strin
         };
       }
     }
-    const value = stripShippedMilestones(content);
+    const value = stripClosedMilestoneDetails(content);
     return {
       value,
       scope: classifyMilestoneWindow({
@@ -1569,7 +1679,8 @@ function getRoadmapPhaseInternal(cwd: string, phaseNum: unknown): RoadmapPhaseRe
     const roadmapRaw = platformReadSync(roadmapPath);
     if (roadmapRaw === null) throw new Error('missing');
     const content = extractCurrentMilestone(roadmapRaw, cwd);
-    const fullContent = stripShippedMilestones(roadmapRaw);
+    // Closed milestone blocks only — an active milestone in a bare <details> keeps its phases.
+    const fullContent = stripClosedMilestoneDetails(roadmapRaw);
 
     for (const source of roadmapPhaseLookupSources(phaseNum)) {
       const scopedResult = findRoadmapPhaseInContent(content, phaseNum, source);
@@ -2319,6 +2430,7 @@ function currentMilestoneRawRanges(
 
 export = {
   stripShippedMilestones,
+  stripClosedMilestoneDetails,
   extractCurrentMilestone,
   extractCurrentMilestoneScoped,
   isMilestoneShippedInRoadmap,

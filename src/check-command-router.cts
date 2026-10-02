@@ -615,7 +615,7 @@ function computeUiPlanGate(projectDir: string, phase: string): {
   phaseLookupFailed?: boolean;
 } {
   // (a) Read the phase section text using the same two-pass lookup as roadmap.get-phase.
-  // getRoadmapPhaseWithFallback: current-milestone first, then stripShippedMilestones
+  // getRoadmapPhaseWithFallback: current-milestone first, then stripClosedMilestoneDetails
   // fallback — mirrors cmdRoadmapGetPhase exactly.
   let phaseSection = '';
   let phaseLookupFailed: boolean | undefined;
