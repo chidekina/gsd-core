@@ -177,6 +177,23 @@ function validateSyntax(filePath) {
   }
 }
 
+/** Remove every entry of `dir` whose name is not in `expected`. */
+function pruneStale(dir, expected) {
+  if (!fs.existsSync(dir)) return;
+  for (const name of fs.readdirSync(dir)) {
+    if (expected.has(name)) continue;
+    const rel = path.relative(DIST_DIR, path.join(dir, name));
+    console.log(`\x1b[33m-\x1b[0m Removing stale ${rel}`);
+    // Best-effort: the installer's ship-list filter is the real guard, so a
+    // locked file (Windows EBUSY/EPERM, a read-only dir) only warns.
+    try {
+      fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`Warning: could not remove stale ${rel}: ${err.code || err.message}`);
+    }
+  }
+}
+
 function build() {
   // Ensure dist and staging directories exist (staging is a sibling of dist
   // used to make writes atomic — see STAGE_DIR comment above).
@@ -196,6 +213,9 @@ function build() {
 
     if (!fs.existsSync(src)) {
       console.warn(`Warning: ${hook} not found, skipping`);
+      // A listed hook whose source is gone must not keep shipping its old
+      // dist copy: the prune below keeps every listed name.
+      fs.rmSync(dest, { force: true });
       continue;
     }
 
@@ -262,6 +282,21 @@ function build() {
       }
       renameAtomicWithRetry(stagedDest, destFile, `${subdir}/${ent.name}`);
     }
+  }
+
+  // Prune stale entries so hooks/dist exactly reflects current sources: a hook
+  // deleted or moved in source must not linger in dist, because the installer
+  // ships dist to users (a stale dist/gsd-find-project-root.sh, moved to lib/,
+  // overwrote a user-owned hooks/gsd-find-project-root.sh). Only names OUTSIDE
+  // the expected set are removed, so a concurrent builder writing the same
+  // expected set is never disturbed.
+  pruneStale(DIST_DIR, new Set([...HOOKS_TO_COPY, ...HOOKS_SUBDIRS_TO_COPY]));
+  for (const subdir of HOOKS_SUBDIRS_TO_COPY) {
+    const srcDir = path.join(HOOKS_DIR, subdir);
+    const expected = fs.existsSync(srcDir)
+      ? new Set(fs.readdirSync(srcDir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name))
+      : new Set();
+    pruneStale(path.join(DIST_DIR, subdir), expected);
   }
 
   // Best-effort cleanup of this process's own staging dir. Since STAGE_DIR
