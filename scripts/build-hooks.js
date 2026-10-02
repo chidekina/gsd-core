@@ -180,8 +180,9 @@ function validateSyntax(filePath) {
 /** True when both paths resolve to the same file (dev + inode). */
 function sameFile(a, b) {
   try {
-    const sa = fs.statSync(a);
-    const sb = fs.statSync(b);
+    // lstat: a symlink alias is its own entry, not the shipped file.
+    const sa = fs.lstatSync(a);
+    const sb = fs.lstatSync(b);
     return sa.dev === sb.dev && sa.ino === sb.ino;
   } catch {
     return false;
@@ -197,7 +198,13 @@ function sameFile(a, b) {
  */
 function removeBestEffort(target) {
   const rel = path.relative(DIST_DIR, target);
-  if (!fs.existsSync(target)) return;
+  // lstat, not existsSync: a dangling symlink must be removed too (the
+  // installer would ENOENT on it).
+  try {
+    fs.lstatSync(target);
+  } catch {
+    return;
+  }
   console.log(`\x1b[33m-\x1b[0m Removing stale ${rel}`);
   try {
     fs.rmSync(target, { recursive: true, force: true });

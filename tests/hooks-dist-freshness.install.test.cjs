@@ -199,6 +199,18 @@ describe('build-hooks: pruning is best-effort, never fails the build', () => {
   });
 });
 
+/** True when `dir` can hold `a` and `A` as two different entries. */
+function caseSensitive(dir) {
+  const name = `case-probe-${process.pid}`;
+  const probe = path.join(dir, name);
+  fs.writeFileSync(probe, '');
+  try {
+    return !fs.existsSync(path.join(dir, name.toUpperCase()));
+  } finally {
+    fs.unlinkSync(probe);
+  }
+}
+
 describe('build-hooks: prune keeps a case-only alias of a shipped file', () => {
   let dir;
   before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-dist-fresh-case-')); });
@@ -207,7 +219,11 @@ describe('build-hooks: prune keeps a case-only alias of a shipped file', () => {
   // On a case-insensitive FS (macOS/Windows) a hook renamed only by case can
   // still be listed under its old-case name after the build writes it, and
   // that name IS the shipped file. Simulated here with a same-inode alias.
-  test('same-inode case variant survives; a distinct stale file is removed', () => {
+  test('same-inode case variant survives; a distinct stale file is removed', (t) => {
+    if (!caseSensitive(dir)) {
+      t.skip('needs a case-sensitive FS to hold two case variants side by side');
+      return;
+    }
     fs.writeFileSync(path.join(dir, 'gsd-hook.js'), '// shipped\n');
     fs.linkSync(path.join(dir, 'gsd-hook.js'), path.join(dir, 'GSD-Hook.js'));
     // Twin exists as a separate file, so the inode comparison really runs.
@@ -243,5 +259,36 @@ describe('build-hooks: a stale listed entry that is a directory', () => {
     assert.ok(!fs.existsSync(path.join(dist, victim)), `stale dist/${victim}/ must not survive its source`);
     const others = HOOKS_TO_COPY.filter((h) => h !== victim);
     for (const h of others) assert.ok(fs.existsSync(path.join(dist, h)), `control: ${h} should be built`);
+  });
+});
+
+describe('build-hooks: symlinks in dist are judged by the link, not the target', () => {
+  let dir;
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-dist-fresh-link-')); });
+  after(() => { cleanup(dir); });
+
+  test('a dangling stray symlink and a symlink case variant are pruned', (t) => {
+    if (process.platform === 'win32') {
+      t.skip('symlink creation needs privileges on Windows');
+      return;
+    }
+    fs.writeFileSync(path.join(dir, 'gsd-hook.js'), '// shipped\n');
+    fs.symlinkSync(path.join(dir, 'nowhere.js'), path.join(dir, 'dangling.js'));
+    fs.symlinkSync(path.join(dir, 'gsd-hook.js'), path.join(dir, 'GSD-HOOK-LINK.js'));
+    // Case variant that is a symlink to the shipped file: an alias made by
+    // hand, not the case-insensitive-FS view of the file itself.
+    let variant = null;
+    if (caseSensitive(dir)) {
+      variant = path.join(dir, 'GSD-Hook.js');
+      fs.symlinkSync(path.join(dir, 'gsd-hook.js'), variant);
+    }
+
+    pruneStale(dir, new Set(['gsd-hook.js']));
+
+    const has = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+    assert.ok(!has(path.join(dir, 'dangling.js')), 'a dangling stray symlink must be pruned');
+    assert.ok(!has(path.join(dir, 'GSD-HOOK-LINK.js')), 'control: a stray symlink to a shipped file is pruned');
+    if (variant) assert.ok(!has(variant), 'a symlink case variant is not the shipped file and must be pruned');
+    assert.ok(fs.existsSync(path.join(dir, 'gsd-hook.js')), 'control: the shipped file is intact');
   });
 });
