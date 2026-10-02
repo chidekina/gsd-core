@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, stripClosedMilestoneDetails, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripClosedMilestoneDetails, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { updateTableCell } from './markdown-table.cjs';
 import { clampPercent } from './phase-lifecycle.cjs';
@@ -736,7 +736,8 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // milestone, so this never claims COMPLETE — it converts silence into a
   // populated, flagged result.
   if (phases.length === 0 && scope !== SCOPE.COMPLETE && _phaseDirNames.length > 0) {
-    const fallbackContent = stripShippedMilestones(rawContent);
+    // Closed milestone blocks only — an active milestone in a bare <details> keeps its phases.
+    const fallbackContent = stripClosedMilestoneDetails(rawContent);
     const fallbackCollection = collectAnalyzePhases(fallbackContent, phasesDir, _phaseDirNames, convention);
     if (fallbackCollection.phases.length > 0) {
       collected = fallbackCollection;

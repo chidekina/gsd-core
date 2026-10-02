@@ -884,3 +884,285 @@ describe('get-phase: bare <details> around an ACTIVE milestone is not stripped',
     assert.strictEqual(getRoadmapPhaseWithFallback(tmpDir, '107'), null, 'shipped block must stay stripped');
   });
 });
+
+describe('summary-aware <details> stripping: review fixtures B–F and vocabulary', () => {
+  // Every case pairs the phase number with a SECOND definition outside the
+  // collapsed block (or asserts on the in-block one directly), so a found:true
+  // / found:false answer is attributable to the strip, not a broken fixture.
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+    writeState(tmpDir, 'v1.15');
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  const writeRoadmap = (body) => fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), body);
+  const getPhase = (n) => {
+    const result = runGsdTools(`roadmap get-phase ${n}`, tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    return JSON.parse(result.output);
+  };
+
+  // A shipped milestone whose Phase 3 must never answer for the later Phase 3.
+  const shippedThenFuture = (summary, inner = '') => `# Roadmap
+
+<details>
+<summary>${summary}</summary>
+
+## v1.0 MVP
+
+### Phase 3: OLD shipped phase
+**Goal:** old
+${inner}
+</details>
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+## v1.16 Next
+
+### Phase 3: NEW future phase
+**Goal:** new
+`;
+
+  test('B: a LEADING ✅ decides closed even when the summary also says "started"', () => {
+    writeRoadmap(shippedThenFuture('✅ v1.0 MVP (Phases 1-4) — SHIPPED 2026-05-01 (started 2026-03)'));
+    assert.strictEqual(getPhase(3).phase_name, 'NEW future phase');
+  });
+
+  test('B2: a LEADING SHIPPED decides closed before a later active word', () => {
+    writeRoadmap(shippedThenFuture('SHIPPED v1.0 MVP — work in progress notes archived'));
+    assert.strictEqual(getPhase(3).phase_name, 'NEW future phase');
+  });
+
+  test('B control: a LEADING 🚧 stays active even with ✅ counts inside', () => {
+    writeRoadmap(`# Roadmap
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+<details>
+<summary>🚧 v1.7 Ops — EM ANDAMENTO (40 ✅ 41 ✅)</summary>
+
+### Phase 40: Active collapsed
+**Goal:** a
+
+</details>
+`);
+    assert.strictEqual(getPhase(40).found, true);
+  });
+
+  test('C: a <details> nested inside a shipped block does not leak the shipped phases after it', () => {
+    writeRoadmap(`# Roadmap
+
+<details>
+<summary>✅ v1.0 MVP — SHIPPED 2026-05-01</summary>
+
+## v1.0 MVP
+
+### Phase 2: OLD a
+**Goal:** old a
+
+<details><summary>notes</summary>
+blah
+</details>
+
+### Phase 3: OLD leaked
+**Goal:** old leaked
+
+</details>
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+## v1.16 Next
+
+### Phase 3: NEW future phase
+**Goal:** new
+`);
+    assert.strictEqual(getPhase(3).phase_name, 'NEW future phase');
+    assert.strictEqual(getPhase(2).found, false, 'the shipped block is stripped as a whole');
+  });
+
+  test('D: <details open> with a closed summary is stripped (documented behaviour)', () => {
+    writeRoadmap(`# Roadmap
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+<details open>
+<summary>✅ v1.0 MVP — SHIPPED 2026-05-01</summary>
+
+### Phase 9: open-shipped
+**Goal:** g
+
+</details>
+`);
+    assert.strictEqual(getPhase(9).found, false);
+    assert.strictEqual(getPhase(1).found, true);
+  });
+
+  test('E: markup inside a shipped <summary> does not hide the closed marker', () => {
+    writeRoadmap(shippedThenFuture('<b>✅ v1.0 MVP — SHIPPED</b>'));
+    assert.strictEqual(getPhase(3).phase_name, 'NEW future phase');
+  });
+
+  test('E2: the leading-✅ rule reads past markup (leading <b> must not hide it)', () => {
+    // Without tag stripping the label leads with "<b>", and the trailing
+    // "started" would make it read as active — the markup is what hides ✅.
+    writeRoadmap(shippedThenFuture('<b>✅ v1.0 MVP — SHIPPED</b> (started 2026-03)'));
+    assert.strictEqual(getPhase(3).phase_name, 'NEW future phase');
+  });
+
+  for (const word of ['Complete', 'Done', 'Concluída', 'Entregue']) {
+    test(`closed vocabulary without ✅: "${word}"`, () => {
+      writeRoadmap(shippedThenFuture(`v1.0 MVP — ${word}`));
+      assert.strictEqual(getPhase(3).phase_name, 'NEW future phase');
+    });
+  }
+
+  test('F: a bare <details> without <summary> is kept (documented behaviour)', () => {
+    writeRoadmap(`# Roadmap
+
+<details>
+
+### Phase 3: in summary-less details
+**Goal:** old
+
+</details>
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+`);
+    assert.strictEqual(getPhase(3).phase_name, 'in summary-less details');
+  });
+});
+
+describe('other phase readers agree with get-phase on a bare 🚧 <details> milestone', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+    writeState(tmpDir, 'v1.15');
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  const ACTIVE_COLLAPSED = `# Roadmap
+
+<details open>
+<summary>🚧 v1.15 Current (In Progress)</summary>
+
+## v1.15 Current
+
+### Phase 101: Current work
+**Goal:** cur
+
+</details>
+
+<details>
+<summary>🚧 v1.16 Next (In Progress)</summary>
+
+## v1.16 Next
+
+### Phase 107: x
+**Goal:** collapsed active
+**Mode:** mvp
+
+</details>
+`;
+
+  test('init plan-phase finds a phase inside a bare 🚧 <details> (getRoadmapPhaseInternal)', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), ACTIVE_COLLAPSED);
+    const result = runGsdTools('init plan-phase 107', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const out = JSON.parse(result.output);
+    assert.strictEqual(out.phase_found, true);
+    assert.strictEqual(out.phase_name, 'x');
+  });
+
+  test('control: init plan-phase — a shipped duplicate number does not win', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), `# Roadmap
+
+<details>
+<summary>✅ v1.0 MVP — SHIPPED 2026-05-01 (started 2026-03)</summary>
+
+### Phase 3: OLD shipped phase
+**Goal:** old
+
+</details>
+
+## v1.15 Current
+
+### Phase 1: Current work
+**Goal:** cur
+
+## v1.16 Next
+
+### Phase 3: NEW future phase
+**Goal:** new
+`);
+    const out = JSON.parse(runGsdTools('init plan-phase 3', tmpDir).output);
+    assert.strictEqual(out.phase_found, true);
+    assert.strictEqual(out.phase_name, 'NEW future phase');
+  });
+
+  test('phase mvp-mode reads **Mode:** from a phase inside a bare 🚧 <details>', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), ACTIVE_COLLAPSED);
+    const result = runGsdTools('phase mvp-mode 107', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const out = JSON.parse(result.output);
+    assert.strictEqual(out.source, 'roadmap');
+    assert.strictEqual(out.active, true);
+  });
+
+  test('roadmap analyze truncated-window fallback keeps phases inside a bare 🚧 <details>', () => {
+    // Window closes over prose (closed v1.0 heading sits between the active
+    // heading and the phase sections) and phase dirs exist, so analyze runs
+    // its #3165 fallback over the stripped document.
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v2.0\n---\n');
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), `# Roadmap
+
+## v2.0 Current 🚧
+
+Active milestone prose.
+
+## v1.0 Old ✅ SHIPPED
+
+### Phase 99: Legacy leftover
+**Goal:** z
+
+<details>
+<summary>🚧 v2.0 phase details</summary>
+
+### Phase 01: One
+**Goal:** a
+
+</details>
+`);
+    const dir = path.join(tmpDir, '.planning', 'phases', '01-one');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '01-01-PLAN.md'), '# plan\n');
+    const result = runGsdTools('roadmap analyze', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const out = JSON.parse(result.output);
+    assert.strictEqual(out.scope, 'truncated', 'fixture must reach the fallback');
+    assert.deepStrictEqual(out.phases.map((p) => p.number), ['99', '01']);
+  });
+});

@@ -92,18 +92,64 @@ function stripShippedMilestones(content: string): string {
 }
 
 /**
+ * Summary-only milestone vocabulary. A `<summary>` is a one-line label, so its
+ * LEADING token is the author's verdict: `✅ v1.0 … (started 2026-03)` is a
+ * shipped milestone that mentions a start date, while `🚧 v1.7 … (40 ✅ 41 ✅)`
+ * is an active milestone that counts its finished phases. The heading
+ * classifier (`isClosedMilestoneHeading`) lets any active word win, which is
+ * right for headings and wrong for these labels — so summaries get their own
+ * rule instead of a change to the shared heading predicate.
+ */
+const SUMMARY_LEADING_CLOSED_PATTERN = /^(?:✅|🗄|SHIPPED\b|ARCHIVED\b|CLOSED\b)/i;
+const SUMMARY_LEADING_ACTIVE_PATTERN = /^(?:🚧|🔄)/;
+const SUMMARY_CLOSED_WORD_PATTERN = /\b(?:COMPLETED?|DONE|ENTREGUE)\b|\bCONCLU[IÍií]D[AOao]\b/i;
+
+function isClosedMilestoneSummary(summaryHtml: string): boolean {
+  const text = summaryHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (SUMMARY_LEADING_CLOSED_PATTERN.test(text)) return true;
+  if (SUMMARY_LEADING_ACTIVE_PATTERN.test(text)) return false;
+  if (MILESTONE_ACTIVE_MARKER_PATTERN.test(text)) return false;
+  return MILESTONE_CLOSED_MARKER_PATTERN.test(text) || SUMMARY_CLOSED_WORD_PATTERN.test(text);
+}
+
+/**
  * #3982: strip only <details> blocks whose <summary> marks a CLOSED milestone
- * (ARCHIVED/SHIPPED/✅/… without an active marker) — the narrow form of
- * stripShippedMilestones the current-milestone window needs. A blanket strip
+ * (see `isClosedMilestoneSummary`) — the narrow form of stripShippedMilestones
+ * the current-milestone window and the get-phase readers need. A blanket strip
  * would delete the ACTIVE milestone's own collapsed blocks (#1341) and
  * reproduce the phase_count: 0 class of #557/#2947.
+ *
+ * Blocks are matched depth-balanced, so a `<details>` nested inside a shipped
+ * block does not end the shipped block early and leak the phases after it. A
+ * block without a `<summary>` is kept; so is an unterminated one. `<details
+ * open>` is classified by its summary like any other block.
  */
 function stripClosedMilestoneDetails(content: string): string {
-  return content.replace(/<details\b[^>]*>[\s\S]*?<\/details>/gi, (block) => {
-    const summaryMatch = block.match(/<summary[^>]*>([^<]*)<\/summary>/i);
-    if (!summaryMatch) return block;
-    return isClosedMilestoneHeading(summaryMatch[1]) ? '' : block;
-  });
+  const tag = /<(\/?)details\b[^>]*>/gi;
+  let out = '';
+  let cursor = 0;
+  let depth = 0;
+  let blockStart = -1;
+  for (const m of content.matchAll(tag)) {
+    const idx = m.index ?? 0;
+    if (m[1] !== '/') {
+      if (depth === 0) blockStart = idx;
+      depth++;
+      continue;
+    }
+    if (depth === 0) continue; // stray close tag: leave it in place
+    depth--;
+    if (depth !== 0) continue;
+    const blockEnd = idx + m[0].length;
+    const block = content.slice(blockStart, blockEnd);
+    const openEnd = block.indexOf('>') + 1;
+    const summaryMatch = block.slice(openEnd).match(/^\s*<summary[^>]*>([\s\S]*?)<\/summary>/i);
+    if (summaryMatch && isClosedMilestoneSummary(summaryMatch[1])) {
+      out += content.slice(cursor, blockStart);
+      cursor = blockEnd;
+    }
+  }
+  return out + content.slice(cursor);
 }
 
 /**
@@ -1569,7 +1615,8 @@ function getRoadmapPhaseInternal(cwd: string, phaseNum: unknown): RoadmapPhaseRe
     const roadmapRaw = platformReadSync(roadmapPath);
     if (roadmapRaw === null) throw new Error('missing');
     const content = extractCurrentMilestone(roadmapRaw, cwd);
-    const fullContent = stripShippedMilestones(roadmapRaw);
+    // Closed milestone blocks only — an active milestone in a bare <details> keeps its phases.
+    const fullContent = stripClosedMilestoneDetails(roadmapRaw);
 
     for (const source of roadmapPhaseLookupSources(phaseNum)) {
       const scopedResult = findRoadmapPhaseInContent(content, phaseNum, source);

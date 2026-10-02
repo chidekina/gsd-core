@@ -61,7 +61,7 @@ import planningScopeMod = require('./planning-scope.cjs');
 const { SCOPE } = planningScopeMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap-parser.cjs is an export= CommonJS module
 import roadmapParserMod = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, currentMilestoneRawRanges, withPhaseSection, findMilestoneScopeHeadingLines } = roadmapParserMod;
+const { stripClosedMilestoneDetails, extractCurrentMilestone, currentMilestoneRawRanges, withPhaseSection, findMilestoneScopeHeadingLines } = roadmapParserMod;
 // #4129: the single owner of "count the ROADMAP's milestone Complete rows"
 // (pure computation, no I/O — no cycle on this path) for the intent-first
 // progress counters the phase-complete transaction passes downstream.
@@ -397,7 +397,8 @@ function getRoadmapModeForPhase(cwd: string, phaseNum: string): string | null {
 
   const rawContent = fs.readFileSync(roadmapPath, 'utf-8');
   const milestoneContent = extractCurrentMilestone(rawContent, cwd);
-  const fullContent = stripShippedMilestones(rawContent);
+  // Closed milestone blocks only — same full-roadmap pass as roadmap get-phase.
+  const fullContent = stripClosedMilestoneDetails(rawContent);
   const escapedPhase = phaseMarkdownRegexSource(phaseNum);
   // phase-id-owner: pre-existing hand-rolled Phase-heading pattern — grandfathered pending Phase 6 migration (ADR-4910 §8, epic #4906)
   const phaseHeader = new RegExp(`#{2,4}\\s*Phase\\s+${escapedPhase}${OPTIONAL_PHASE_TAG_SOURCE}\\s*:`, 'i');
