@@ -113,6 +113,13 @@ type FullLineCommentChannel = { leading: Record<string, string[]>; trailing: str
  */
 const FRONTMATTER_UNPARSEABLE = Symbol('frontmatterUnparseable');
 
+/**
+ * The one diagnostic every read surface reports when a frontmatter block carries the
+ * FRONTMATTER_UNPARSEABLE marker (`frontmatter get`'s `error`, `state json`'s
+ * `frontmatter_error`). One string, so the two surfaces cannot drift apart.
+ */
+const FRONTMATTER_UNPARSEABLE_MESSAGE = 'Frontmatter is not parseable YAML — fix the syntax error in the frontmatter block';
+
 function unparseableResult(): Frontmatter {
   // Plain-prototype (post-remote-runner-fix, #3881): the PUBLIC parse surface must keep
   // handing callers ordinary `{}`-shaped objects — `assert.deepStrictEqual` compares
@@ -1383,7 +1390,7 @@ function cmdFrontmatterGet(cwd: string, filePath: string, field: string | undefi
   // "Field not found" tells the caller the key is absent, which is
   // indistinguishable from a file that genuinely lacks it.
   if ((fm as unknown as Record<symbol, unknown>)[FRONTMATTER_UNPARSEABLE] === true) {
-    output({ error: 'Frontmatter is not parseable YAML — fix the syntax error in the frontmatter block', path: filePath }, raw, undefined);
+    output({ error: FRONTMATTER_UNPARSEABLE_MESSAGE, path: filePath }, raw, undefined);
     return;
   }
   if (field) {
@@ -1574,6 +1581,7 @@ export = {
   // ADR-3473 §8.1 (#3881, consequence 2): the unparseable-vs-empty marker Symbol. Exported so
   // the 8 `hasFrontmatter` call sites named in the design can consult it in a follow-up change.
   FRONTMATTER_UNPARSEABLE,
+  FRONTMATTER_UNPARSEABLE_MESSAGE,
   // Additive alias (#644 prohibition-probe schema contract): the probe round-trip seam reads a
   // frontmatter object via `parseFrontmatter` (the name the contract test pins). It is the SAME
   // function as `extractFrontmatter` — a bare-object parse with no behavior change — exposed under

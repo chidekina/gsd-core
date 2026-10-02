@@ -47,7 +47,7 @@ const { planningDir, planningPaths, resolvePhaseIdConvention } = planningWorkspa
 import { realClock } from './clock.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import frontmatter = require('./frontmatter.cjs');
-const { extractFrontmatter, reconstructFrontmatter, stripFrontmatter, propagateCommentChannel, FRONTMATTER_UNPARSEABLE } = frontmatter;
+const { extractFrontmatter, reconstructFrontmatter, stripFrontmatter, propagateCommentChannel, FRONTMATTER_UNPARSEABLE, FRONTMATTER_UNPARSEABLE_MESSAGE } = frontmatter;
 
 /**
  * ADR-3473 §8.1 (#3881, consequence 2 wiring): does `existingFm` carry the
@@ -5100,6 +5100,14 @@ function cmdStateJson(cwd: string, raw: boolean): void {
   // "Last activity:" line must not surface as the current value. Mirrors the
   // syncStateFrontmatter guard so the read path agrees with the write path.
   preferNewerLastActivity(existingFm, built);
+
+  // An unparseable frontmatter block reads as `{}`, so every curated field above
+  // silently fell back to body/defaults (e.g. status "unknown"). Name the cause
+  // in-band, with the same diagnostic `frontmatter get` reports. Additive key:
+  // `error` keeps its "STATE.md not found" meaning for existing consumers.
+  if (isUnparseableFrontmatter(existingFm)) {
+    built['frontmatter_error'] = FRONTMATTER_UNPARSEABLE_MESSAGE;
+  }
 
   output(built, raw, JSON.stringify(built, null, 2));
 }

@@ -787,6 +787,58 @@ stopped_at: Plan 2 of Phase 3
     assert.strictEqual(output.stopped_at, 'Plan 2 of Phase 3', 'stopped_at from frontmatter');
   });
 
+  test('unparseable frontmatter is surfaced as frontmatter_error, not a silent "unknown"', () => {
+    // An unescaped inner quote makes the YAML block unparseable. Before, state json
+    // dropped every frontmatter field and reported status "unknown" with no signal.
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `---
+gsd_state_version: 1.0
+status: executing
+stopped_at: "Phase 3 "done" ok"
+---
+
+# Project State
+`
+    );
+
+    const result = runGsdTools('state json', tmpDir);
+    assert.ok(result.success, `Command should succeed (same exit semantics as frontmatter get): ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.ok(output.frontmatter_error, `frontmatter_error must be present; got: ${result.output}`);
+
+    // Same diagnostic `frontmatter get` reports for the same file.
+    const fmGet = JSON.parse(runGsdTools('frontmatter get .planning/STATE.md', tmpDir).output);
+    assert.ok(fmGet.error, 'control: frontmatter get must flag the same file');
+    assert.strictEqual(output.frontmatter_error, fmGet.error);
+    // Additive: the rebuilt state object is still emitted, and `error` keeps its
+    // "STATE.md not found" meaning for existing consumers.
+    assert.strictEqual(output.gsd_state_version, '1.0');
+    assert.strictEqual(output.error, undefined);
+  });
+
+  test('control: valid frontmatter carries no frontmatter_error', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `---
+gsd_state_version: 1.0
+status: executing
+stopped_at: 'Phase 3 "done" ok'
+---
+
+# Project State
+`
+    );
+
+    const result = runGsdTools('state json', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.ok(!('frontmatter_error' in output), `no frontmatter_error expected; got: ${result.output}`);
+    // Same file parses: the curated values come through (proves the fixture is read).
+    assert.strictEqual(output.status, 'executing');
+    assert.strictEqual(output.stopped_at, 'Phase 3 "done" ok');
+  });
+
   test('normalizes various status values', () => {
     // #4186: recognition is an ANCHORED whole-field vocabulary match. The
     // vocabulary's own values normalize to their token; prefix/suffix NARRATIVE

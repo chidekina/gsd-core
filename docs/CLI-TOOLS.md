@@ -78,7 +78,9 @@ Manage `.planning/STATE.md` — the project's living memory.
 # Load full project config + state as JSON
 node gsd-tools.cjs state load
 
-# Output STATE.md frontmatter as JSON
+# Output STATE.md frontmatter as JSON. If the frontmatter block is not
+# parseable YAML, the output carries `frontmatter_error` (same message as
+# `frontmatter get`) and curated fields fall back to body-derived values.
 node gsd-tools.cjs state json
 
 # Update a single field. Frontmatter keys are projections of body fields —
