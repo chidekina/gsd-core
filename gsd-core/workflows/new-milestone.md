@@ -204,15 +204,21 @@ blockers, todos) is preserved across the switch — symmetric with
 
 ```bash
 GSD_WS_ARG=$(cat .planning/.gsd-ws-arg 2>/dev/null || true)
-OUTGOING_MILESTONE=$(gsd_run query state.get milestone --raw $GSD_WS_ARG || true)
+OUTGOING_ERR=$(mktemp)
+OUTGOING_MILESTONE=$(gsd_run query state.get milestone --raw $GSD_WS_ARG 2>"$OUTGOING_ERR" || true)
+cat "$OUTGOING_ERR" >&2
+if grep -q '^frontmatter_error:' "$OUTGOING_ERR"; then rm -f "$OUTGOING_ERR"; echo "STOP: STATE.md frontmatter is unusable — fix it before switching milestones" >&2; exit 1; fi
+rm -f "$OUTGOING_ERR"
 printf '%s' "$OUTGOING_MILESTONE" > .planning/.gsd-outgoing-milestone 2>/dev/null || true
 echo "Outgoing milestone (phase history archives under THIS version in step 6): ${OUTGOING_MILESTONE:-<unknown>}"
 gsd_run query state.milestone-switch --milestone "v[X.Y]" --name "[Name]" $GSD_WS_ARG
 ```
 
-**If that read printed `frontmatter_error:` on stderr, STOP** and report it: STATE.md's
-frontmatter could not be read, so the captured outgoing version is unreliable (it may be raw
-line text). Fix the frontmatter before switching milestones.
+**If the read prints `frontmatter_error:` on stderr, the block stops before the switch.** Report
+it: STATE.md's frontmatter could not be read, so the captured outgoing version is unreliable (it
+may be raw line text), and the frontmatter must be fixed before switching milestones. A missing
+STATE.md instead prints `Error: STATE.md not found`; that only means there is no outgoing
+milestone, so continue.
 
 **Capture the outgoing version now.** The lines above read the *current* (previous) milestone
 version BEFORE the switch flips STATE.md's `milestone:` field to the new one, and persist it to

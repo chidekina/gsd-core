@@ -1010,6 +1010,12 @@ describe('state read verbs surface unusable frontmatter as frontmatter_error', (
     assert.ok(line, 'the outgoing-milestone read must exist');
     assert.ok(!line.includes('2>/dev/null'), `stderr must reach the workflow: ${line}`);
     assert.ok(md.includes('frontmatter_error'), 'the workflow must say what to do with it');
+    // The stop must act BEFORE the switch: the read and the switch run in one bash block,
+    // so a prose STOP placed after the block comes too late.
+    const guardAt = md.indexOf("grep -q '^frontmatter_error:'");
+    const switchAt = md.indexOf('gsd_run query state.milestone-switch');
+    assert.ok(guardAt > 0, 'the workflow must check the read for frontmatter_error in shell');
+    assert.ok(guardAt < switchAt, 'the frontmatter_error guard must run before state.milestone-switch');
   });
 
   test('workflows/next.md stops on frontmatter_error before routing', () => {
