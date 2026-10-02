@@ -2319,6 +2319,7 @@ function currentMilestoneRawRanges(
 
 export = {
   stripShippedMilestones,
+  stripClosedMilestoneDetails,
   extractCurrentMilestone,
   extractCurrentMilestoneScoped,
   isMilestoneShippedInRoadmap,

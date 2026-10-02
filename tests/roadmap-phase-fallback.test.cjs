@@ -808,3 +808,79 @@ Active milestone body.
     );
   });
 });
+
+describe('get-phase: bare <details> around an ACTIVE milestone is not stripped', () => {
+  // A ROADMAP that collapses an in-progress milestone in a plain <details>
+  // (no `open` attribute) must still resolve that milestone's phases. Only a
+  // block whose <summary> marks the milestone closed (✅/SHIPPED/…) is history.
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  function writeRoadmap(nextSummary) {
+    writeState(tmpDir, 'v1.15');
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap
+
+<details open>
+<summary>🚧 v1.15 Current (In Progress)</summary>
+
+## v1.15 Current
+
+### Phase 101: Current work
+**Goal:** Work in the current milestone
+
+</details>
+
+<details>
+<summary>${nextSummary}</summary>
+
+## v1.16 Next
+
+### Phase 107: x
+**Goal:** Phase inside a collapsed milestone
+
+</details>
+`
+    );
+  }
+
+  test('phase inside a bare <details> with an active (🚧) summary is found', () => {
+    writeRoadmap('🚧 v1.16 Next (In Progress)');
+    const result = runGsdTools('roadmap get-phase 107', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.found, true, 'phase 107 in an active milestone must resolve');
+    assert.strictEqual(output.phase_name, 'x');
+    // Control on the same fixture: the current-milestone phase still resolves.
+    const current = JSON.parse(runGsdTools('roadmap get-phase 101', tmpDir).output);
+    assert.strictEqual(current.found, true);
+  });
+
+  test('control: phase inside a bare <details> with a SHIPPED (✅) summary stays hidden', () => {
+    writeRoadmap('✅ v1.16 Next — SHIPPED 2026-09-01');
+    const result = runGsdTools('roadmap get-phase 107', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.found, false, 'a shipped milestone block must stay stripped');
+    // Same fixture, the active phase resolves — so found:false is the strip, not a broken fixture.
+    const current = JSON.parse(runGsdTools('roadmap get-phase 101', tmpDir).output);
+    assert.strictEqual(current.found, true);
+  });
+
+  test('getRoadmapPhaseWithFallback (ui-plan-gate resolver) agrees with get-phase', () => {
+    const { getRoadmapPhaseWithFallback } = require('../gsd-core/bin/lib/roadmap.cjs');
+    writeRoadmap('🚧 v1.16 Next (In Progress)');
+    const active = getRoadmapPhaseWithFallback(tmpDir, '107');
+    assert.ok(active && active.includes('Phase 107: x'), 'active collapsed milestone phase must resolve');
+    writeRoadmap('✅ v1.16 Next — SHIPPED 2026-09-01');
+    assert.strictEqual(getRoadmapPhaseWithFallback(tmpDir, '107'), null, 'shipped block must stay stripped');
+  });
+});
