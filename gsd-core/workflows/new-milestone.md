@@ -204,7 +204,7 @@ blockers, todos) is preserved across the switch — symmetric with
 
 ```bash
 GSD_WS_ARG=$(cat .planning/.gsd-ws-arg 2>/dev/null || true)
-OUTGOING_ERR=$(mktemp)
+OUTGOING_ERR=$(mktemp) || { echo "STOP: mktemp failed — cannot check the outgoing-milestone read" >&2; exit 1; }
 OUTGOING_MILESTONE=$(gsd_run query state.get milestone --raw $GSD_WS_ARG 2>"$OUTGOING_ERR" || true)
 cat "$OUTGOING_ERR" >&2
 if grep -q '^frontmatter_error:' "$OUTGOING_ERR"; then rm -f "$OUTGOING_ERR"; echo "STOP: STATE.md frontmatter is unusable — fix it before switching milestones" >&2; exit 1; fi

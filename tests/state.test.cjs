@@ -1018,6 +1018,63 @@ describe('state read verbs surface unusable frontmatter as frontmatter_error', (
     assert.ok(guardAt < switchAt, 'the frontmatter_error guard must run before state.milestone-switch');
   });
 
+  // Execute the real outgoing-milestone block from new-milestone.md (not a string-order check):
+  // the read runs against the real CLI; only state.milestone-switch is stubbed to a marker line.
+  const runNewMilestoneBlock = (extraEnv = {}) => {
+    const { spawnSync } = require('child_process');
+    const { TOOLS_PATH } = require('./helpers.cjs');
+    const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'new-milestone.md'), 'utf-8');
+    // Line scan, not a fence regex: take the bash fence that holds the outgoing-milestone read.
+    const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+    const lines = splitLines(md);
+    const readAt = lines.findIndex((l) => l.includes('state.get milestone --raw'));
+    let open = readAt;
+    while (open >= 0 && lines[open].trim() !== '```bash') open--;
+    let close = readAt;
+    while (close >= 0 && close < lines.length && lines[close].trim() !== '```') close++;
+    const block = readAt >= 0 && open >= 0 && close < lines.length ? lines.slice(open + 1, close).join('\n') : '';
+    assert.ok(block.includes('state.milestone-switch'), 'the outgoing-milestone bash block must exist');
+    const stub = `gsd_run() { if [ "$1" = query ] && [ "$2" = state.milestone-switch ]; then echo "SWITCH_REACHED"; return 0; fi; node ${JSON.stringify(TOOLS_PATH)} "$@"; }\n`;
+    const env = { ...process.env, ...extraEnv };
+    delete env.GSD_PROJECT;
+    delete env.GSD_WORKSTREAM;
+    return spawnSync('bash', ['-c', stub + block], { cwd: tmpDir, encoding: 'utf-8', env, timeout: PROBE_TIMEOUT_MS });
+  };
+  const bashTest = process.platform === 'win32' ? test.skip : test;
+
+  bashTest('new-milestone block: unusable frontmatter stops before the switch (exit 1)', () => {
+    writeStateMd('---\nmilestone: v1.0\nstopped_at: "a "b" c"\n---\n\n# Project State\n');
+    const r = runNewMilestoneBlock();
+    assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes('SWITCH_REACHED'), 'the switch must not run');
+    assert.ok(r.stderr.includes('frontmatter_error:'), r.stderr);
+  });
+
+  bashTest('new-milestone block: valid frontmatter reaches the switch with the outgoing version', () => {
+    writeStateMd('---\nmilestone: v1.0\n---\n\n# Project State\n');
+    const r = runNewMilestoneBlock();
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.ok(r.stdout.includes('SWITCH_REACHED'), r.stdout);
+    assert.ok(r.stdout.includes('in step 6): v1.0'), r.stdout);
+  });
+
+  bashTest('new-milestone block: a missing STATE.md continues with <unknown>', () => {
+    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
+    if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+    const r = runNewMilestoneBlock();
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.ok(r.stdout.includes('SWITCH_REACHED'), r.stdout);
+    assert.ok(r.stdout.includes('<unknown>'), r.stdout);
+  });
+
+  bashTest('new-milestone block: a failing mktemp fails CLOSED (exit 1, no switch)', () => {
+    writeStateMd('---\nmilestone: v1.0\n---\n\n# Project State\n');
+    const r = runNewMilestoneBlock({ TMPDIR: path.join(tmpDir, 'does-not-exist') });
+    assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes('SWITCH_REACHED'), 'the switch must not run');
+  });
+
   test('workflows/next.md stops on frontmatter_error before routing', () => {
     const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'next.md'), 'utf-8');
     const start = md.indexOf('gsd_run query state.json');
