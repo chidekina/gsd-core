@@ -1301,6 +1301,18 @@ describe('re-verification: closed words need a version + status position; first 
     });
   }
 
+  test('round 5: a PT-BR active word must be a whole word — "Ativação" is not "ATIVA"', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(shippedThenFuture('v1.0 — Ativação concluída'));
+    assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
+  });
+
+  test('round 5 control: a word that ENDS in "ativa" ("Iniciativa") is not ATIVA either', () => {
+    writeState(tmpDir, 'v1.15');
+    writeRoadmap(shippedThenFuture('v1.0 — Iniciativa concluída'));
+    assert.strictEqual(run('roadmap get-phase 3').phase_name, 'NEW future phase');
+  });
+
   test('control: an active marker before a closed one keeps the block ("v1.7 In Progress — 40 ✅")', () => {
     writeState(tmpDir, 'v1.15');
     writeRoadmap(shippedThenFuture('v1.0 In Progress — 40 ✅ 41 ✅'));

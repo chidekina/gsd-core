@@ -111,7 +111,9 @@ function stripShippedMilestones(content: string): string {
  * (EM ANDAMENTO / ATIVA / PLANEJADA) as non-closed markers, so "v1.7 — EM ANDAMENTO
  * (40 ✅ 41 ✅)" stays active under first-marker-wins.
  */
-const SUMMARY_ACTIVE_PT_PATTERN = /\b(?:EM ANDAMENTO|ATIVA|PLANEJADA)\b/i;
+// Accent-aware word guards: JS `\b` without the `u` flag treats `ç`/`ã` as non-word, so
+// `\bATIVA\b` would match inside "Ativação".
+const SUMMARY_ACTIVE_PT_PATTERN = /(?<![\wÀ-ÿ])(?:EM ANDAMENTO|ATIVA|PLANEJADA)(?![\wÀ-ÿ])/i;
 const SUMMARY_VERSION_PATTERN = /\bv\d+(?:\.\d+)+/i;
 const SUMMARY_CLOSED_WORD = '(?:COMPLETED?|DONE|ENTREGUE|CONCLU[IÍií]D[AOao])';
 const SUMMARY_CLOSED_WORD_PATTERN = new RegExp(
