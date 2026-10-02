@@ -77,8 +77,9 @@ const { ensureCommonJsMarker, removeCommonJsMarker } = require('../gsd-core/bin/
 // records exactly the same set that build-hooks.js copies to hooks/dist/, making
 // the manifest and the installed hooks/ dir structurally identical. Avoids the
 // prefix/extension-regex approach that missed managed-hooks-registry.cjs (#941).
-const { HOOKS_TO_COPY: _HOOKS_TO_COPY } = require('../scripts/build-hooks.js');
+const { HOOKS_TO_COPY: _HOOKS_TO_COPY, HOOKS_SUBDIRS_TO_COPY: _HOOKS_SUBDIRS_TO_COPY } = require('../scripts/build-hooks.js');
 const INSTALLED_HOOK_FILES = new Set(_HOOKS_TO_COPY);
+const INSTALLED_HOOK_SUBDIRS = new Set(_HOOKS_SUBDIRS_TO_COPY);
 
 // ADR-857 phase 5f-1: hook-surface writer functions extracted to a dedicated
 // module. install.js used to re-export the whole hooksSurface surface so
@@ -12035,12 +12036,20 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
     if (fs.existsSync(hooksSrc)) {
       const hooksDest = path.join(destRootDir, sharedHooksDirName);
       fs.mkdirSync(hooksDest, { recursive: true });
-      const hookEntries = fs.readdirSync(hooksSrc);
+      // Copy only what GSD ships (the same HOOKS_TO_COPY / subdir lists that
+      // drive the manifest). A stray hooks/dist entry — e.g. a stale
+      // gsd-find-project-root.sh left by an older build after the file moved
+      // to lib/ — must never overwrite a user-owned file of the same name.
+      // Filtered before any stat: a stray pruned by a concurrent build would
+      // otherwise throw ENOENT here.
+      const hookEntries = fs.readdirSync(hooksSrc)
+        .filter((e) => INSTALLED_HOOK_FILES.has(e) || INSTALLED_HOOK_SUBDIRS.has(e));
       if (hookEntries.some((e) => fs.statSync(path.join(hooksSrc, e)).isFile())) stagedHooks = true;
       const configDirReplacement = getConfigDirFromHome(runtime, isGlobal);
       for (const entry of hookEntries) {
         const srcFile = path.join(hooksSrc, entry);
         if (fs.statSync(srcFile).isFile()) {
+          if (!INSTALLED_HOOK_FILES.has(entry)) continue;
           const destFile = path.join(hooksDest, entry);
           if (entry.endsWith('.js') || entry.endsWith('.cjs')) {
             let content = fs.readFileSync(srcFile, 'utf8');
@@ -12077,6 +12086,7 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
             }
           }
         } else if (fs.statSync(srcFile).isDirectory()) {
+          if (!INSTALLED_HOOK_SUBDIRS.has(entry)) continue;
           // #3579: recurse one level into hook subdirs (lib/ etc.). The
           // graphify auto-update hook's rebuild helper lives at
           // hooks/dist/lib/gsd-graphify-rebuild.sh and must land at the
