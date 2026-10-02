@@ -16,8 +16,9 @@
  * `.js` present and every `.sh` absent read as fully populated and the
  * rebuild was silently skipped. The set-membership check has no such blind
  * spot: any expected entry missing, of any extension, is stale. It does NOT
- * flag extra/unexpected files as stale — hooks/dist legitimately accumulates
- * output the list does not name (subdirectory output, hooks/lib) — and it
+ * flag extra/unexpected files as stale — hooks/dist legitimately holds
+ * output HOOKS_TO_COPY does not name (the HOOKS_SUBDIRS_TO_COPY subdirs, e.g.
+ * lib/), and the build itself prunes anything outside both lists — and it
  * stays cheap (one `readdirSync` into a `Set`, no per-entry `existsSync`, no
  * `statSync`) since it runs once per suite.
  *

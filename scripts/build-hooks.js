@@ -177,6 +177,57 @@ function validateSyntax(filePath) {
   }
 }
 
+/** True when both paths resolve to the same file (dev + inode). */
+function sameFile(a, b) {
+  try {
+    // lstat: a symlink alias is its own entry, not the shipped file.
+    const sa = fs.lstatSync(a);
+    const sb = fs.lstatSync(b);
+    return sa.dev === sb.dev && sa.ino === sb.ino;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove a stale dist entry (file or directory). Best-effort: a locked file
+ * (Windows EBUSY/EPERM, a read-only dir) only warns, so the build still runs.
+ * The installer's ship-list filter guards the TOP level of hooks/dist only;
+ * hooks/dist/lib/* is copied as-is, so a stale lib entry that cannot be
+ * removed here still ships (the warning is the signal).
+ */
+function removeBestEffort(target) {
+  const rel = path.relative(DIST_DIR, target);
+  // lstat, not existsSync: a dangling symlink must be removed too (the
+  // installer would ENOENT on it).
+  try {
+    fs.lstatSync(target);
+  } catch {
+    return;
+  }
+  console.log(`\x1b[33m-\x1b[0m Removing stale ${rel}`);
+  try {
+    fs.rmSync(target, { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`Warning: could not remove stale ${rel}: ${err.code || err.message}`);
+  }
+}
+
+/** Remove every entry of `dir` whose name is not in `expected`. */
+function pruneStale(dir, expected) {
+  if (!fs.existsSync(dir)) return;
+  const expectedByLower = new Map([...expected].map((n) => [n.toLowerCase(), n]));
+  for (const name of fs.readdirSync(dir)) {
+    if (expected.has(name)) continue;
+    // A case-insensitive FS (macOS/Windows) can list a hook renamed only by
+    // case under its old-case name; that name IS the file just written, so
+    // pruning it would delete the shipped hook. Same inode = same file.
+    const twin = expectedByLower.get(name.toLowerCase());
+    if (twin && sameFile(path.join(dir, name), path.join(dir, twin))) continue;
+    removeBestEffort(path.join(dir, name));
+  }
+}
+
 function build() {
   // Ensure dist and staging directories exist (staging is a sibling of dist
   // used to make writes atomic — see STAGE_DIR comment above).
@@ -196,6 +247,9 @@ function build() {
 
     if (!fs.existsSync(src)) {
       console.warn(`Warning: ${hook} not found, skipping`);
+      // A listed hook whose source is gone must not keep shipping its old
+      // dist copy: the prune below keeps every listed name.
+      removeBestEffort(dest);
       continue;
     }
 
@@ -264,6 +318,21 @@ function build() {
     }
   }
 
+  // Prune stale entries so hooks/dist exactly reflects current sources: a hook
+  // deleted or moved in source must not linger in dist, because the installer
+  // ships dist to users (a stale dist/gsd-find-project-root.sh, moved to lib/,
+  // overwrote a user-owned hooks/gsd-find-project-root.sh). Only names OUTSIDE
+  // the expected set are removed, so a concurrent builder writing the same
+  // expected set is never disturbed.
+  pruneStale(DIST_DIR, new Set([...HOOKS_TO_COPY, ...HOOKS_SUBDIRS_TO_COPY]));
+  for (const subdir of HOOKS_SUBDIRS_TO_COPY) {
+    const srcDir = path.join(HOOKS_DIR, subdir);
+    const expected = fs.existsSync(srcDir)
+      ? new Set(fs.readdirSync(srcDir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name))
+      : new Set();
+    pruneStale(path.join(DIST_DIR, subdir), expected);
+  }
+
   // Best-effort cleanup of this process's own staging dir. Since STAGE_DIR
   // is per-PID (`.dist-staging-<pid>/`), no other builder touches it — so
   // rmSync with recursive:true is safe and leaves no race window.
@@ -288,4 +357,4 @@ if (require.main === module) {
   build();
 }
 
-module.exports = { HOOKS_TO_COPY, HOOKS_SUBDIRS_TO_COPY };
+module.exports = { HOOKS_TO_COPY, HOOKS_SUBDIRS_TO_COPY, pruneStale };
