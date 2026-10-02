@@ -871,6 +871,109 @@ stopped_at: 'Phase 3 "done" ok'
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Unusable STATE.md frontmatter is named on every STATE read verb
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('state read verbs surface unusable frontmatter as frontmatter_error', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createFixture();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  const BAD_QUOTE = '---\ngsd_state_version: 1.0\nstatus: executing\nstopped_at: "Phase 3 "done" ok"\n---\n\n# Project State\n\n**Status:** Paused\n';
+  const VALID = '---\ngsd_state_version: 1.0\nstatus: executing\n---\n\n# Project State\n\n**Status:** Executing\n';
+  const writeStateMd = (content) => fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), content);
+  const json = (cmd) => {
+    const result = runGsdTools(cmd, tmpDir);
+    assert.ok(result.success, `${cmd} failed: ${result.error}`);
+    return JSON.parse(result.output);
+  };
+
+  // ── state json: the shapes that used to collapse to {} without a signal ──
+  const surfaced = [
+    ['unclosed fence below the warning threshold (one key)', '---\nstatus: executing\n', 'FRONTMATTER_UNTERMINATED_MESSAGE'],
+    ['a YAML list instead of a mapping', '---\n- status: executing\n- current_phase: 3\n---\n\n# Project State\n', 'FRONTMATTER_NOT_MAPPING_MESSAGE'],
+    ['a bare scalar instead of a mapping', '---\njust some text\n---\n\n# Project State\n', 'FRONTMATTER_NOT_MAPPING_MESSAGE'],
+  ];
+  for (const [label, content, constant] of surfaced) {
+    test(`state json: ${label} is surfaced`, () => {
+      writeStateMd(content);
+      const out = json('state json');
+      assert.ok(out.frontmatter_error, `frontmatter_error must be present; got ${JSON.stringify(out)}`);
+      assert.strictEqual(out.frontmatter_error, frontmatterLib[constant]);
+    });
+  }
+
+  // ── no-false-positive controls ──
+  const clean = [
+    ['no frontmatter at all', '# Project State\n\n**Status:** Executing\n'],
+    ['empty fences', '---\n---\n\n# Project State\n'],
+    ['a blank line between the fences', '---\n\n---\n\n# Project State\n'],
+    ['a document that merely opens with a thematic break', '---\n# Project State\n\nSome prose.\n'],
+    ['a thematic break above a labelled preamble and prose (no closing fence)', '---\nAuthor: Jane Doe\n\nOrdinary prose, and no second fence anywhere.\n'],
+    ['valid frontmatter', VALID],
+  ];
+  for (const [label, content] of clean) {
+    test(`control: state json — ${label} carries no frontmatter_error`, () => {
+      writeStateMd(content);
+      const out = json('state json');
+      assert.ok(!('frontmatter_error' in out), `unexpected frontmatter_error: ${JSON.stringify(out)}`);
+      assert.strictEqual(out.gsd_state_version, '1.0', 'the state object is still emitted');
+    });
+  }
+
+  // ── the other STATE read verbs report the same condition the same way ──
+  const verbs = [
+    ['state load', 'state load'],
+    ['state get (whole file)', 'state get'],
+    ['state get <field>', 'state get Status'],
+    ['state-snapshot', 'state-snapshot'],
+  ];
+  for (const [label, cmd] of verbs) {
+    test(`${label}: unparseable frontmatter is surfaced`, () => {
+      writeStateMd(BAD_QUOTE);
+      const out = json(cmd);
+      assert.ok(out.frontmatter_error, `frontmatter_error must be present; got ${JSON.stringify(out).slice(0, 300)}`);
+      assert.strictEqual(out.frontmatter_error, json('state json').frontmatter_error, 'same diagnostic as state json');
+    });
+    test(`control: ${label} — valid frontmatter carries no frontmatter_error`, () => {
+      writeStateMd(VALID);
+      const out = json(cmd);
+      assert.ok(!('frontmatter_error' in out), `unexpected frontmatter_error: ${JSON.stringify(out).slice(0, 300)}`);
+    });
+  }
+
+  test('state validate: unparseable frontmatter is an S010 warning', () => {
+    writeStateMd(BAD_QUOTE);
+    const result = runGsdTools('state validate', tmpDir);
+    const out = JSON.parse(result.output);
+    const s010 = (out.warnings || []).find((w) => w.code === 'S010');
+    assert.ok(s010, `S010 must fire; got ${JSON.stringify(out.warnings)}`);
+    assert.strictEqual(s010.message.includes(json('state json').frontmatter_error), true);
+  });
+
+  test('control: state validate — valid frontmatter has no S010', () => {
+    writeStateMd(VALID);
+    const out = JSON.parse(runGsdTools('state validate', tmpDir).output);
+    assert.ok(Array.isArray(out.warnings), 'validate must report a warnings array');
+    assert.ok(!out.warnings.some((w) => w.code === 'S010'), JSON.stringify(out.warnings));
+  });
+
+  test('workflows/next.md stops on frontmatter_error before routing', () => {
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'next.md'), 'utf-8');
+    const start = md.indexOf('gsd_run query state.json');
+    const end = md.indexOf('If no `.planning/` directory exists');
+    assert.ok(start > 0 && end > start, 'next.md state-read block must exist');
+    assert.ok(md.slice(start, end).includes('frontmatter_error'), 'the state-read block must check frontmatter_error');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // STATE.md frontmatter sync (write operations add frontmatter)
 // ─────────────────────────────────────────────────────────────────────────────
 
