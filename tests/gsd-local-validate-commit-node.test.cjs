@@ -400,3 +400,26 @@ describe('[gsd-local] bare-node detector covers every command-position prefix', 
     test(`does not flag: ${line}`, () => assert.ok(!BARE_NODE_RE.test(line) || /^\s*#/.test(line), line));
   }
 });
+
+describe('[gsd-local] bareNodeLines ignores prose inside string literals', () => {
+  const { bareNodeLines } = require('./helpers/bare-node.cjs');
+  const hits = (line) => bareNodeLines(line).length;
+  // Prose that merely mentions node inside quotes is not a call.
+  const PROSE = [
+    'echo "if node is absent"', "echo 'then node foo.js'", 'echo "use: node -e x"',
+    'printf "%s\\n" "do node script.js"', 'echo "a" "while node is gone"',
+  ];
+  for (const line of PROSE) {
+    test(`prose not flagged: ${line}`, () => assert.strictEqual(hits(line), 0, line));
+  }
+  // Forged positives: a real call must still fire, including one living inside
+  // a quoted command substitution or after a quoted segment.
+  const REAL = [
+    'node -e "x"', 'echo "x"; node -e "x"', 'echo "x" && node script.js', 'x="$(node -p 1)"',
+    'echo "$(node -e x)"', 'echo "a `node -e x` b"', 'echo "it\'s" ; node -e "x"',
+    'if node -e "x"; then :; fi', 'a=$(node -p 1)',
+  ];
+  for (const line of REAL) {
+    test(`real call still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
+  }
+});
