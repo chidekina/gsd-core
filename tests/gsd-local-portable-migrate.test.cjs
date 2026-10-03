@@ -183,6 +183,23 @@ describe('[gsd-local] reconcileManagedChainCommandsToRunner: which commands it o
     assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, link), false, 'control: a real OTHER dir stays foreign');
   });
 
+  test('a symlinked config dir owns the real dir\'s scripts even when <config>/hooks does not exist yet', (t) => {
+    const base = createTempDir('gsd-local-portmig-nohooks-');
+    t.after(() => cleanup(base));
+    const real = path.join(base, 'real');
+    fs.mkdirSync(real); // deliberately NO hooks/ underneath
+    const link = path.join(base, 'link');
+    fs.symlinkSync(real, link);
+    for (const [cfg, dir] of [[link, real], [real, link]]) {
+      const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: PREFIX + JSON.stringify(`${dir}/hooks/gsd-prompt-guard.js`) }] }] } };
+      assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, cfg), true, `cfg=${cfg} script in ${dir}`);
+    }
+    const other = path.join(base, 'other');
+    fs.mkdirSync(other); // a real OTHER dir, also without hooks/
+    const s = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: PREFIX + JSON.stringify(`${other}/hooks/gsd-prompt-guard.js`) }] }] } };
+    assert.equal(hooksSurface.reconcileManagedChainCommandsToRunner(s, build, link), false, 'control: a real OTHER dir stays foreign');
+  });
+
   test('a relative token is never ours, even with the cwd inside the config hooks dir', () => {
     const base = createTempDir('gsd-local-portmig-rel-');
     const hooks = path.join(base, 'hooks');

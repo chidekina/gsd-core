@@ -810,7 +810,18 @@ function reconcileManagedChainCommandsToRunner(
   // symlinked config dir must not leave a managed hook on the chain (fail-open).
   const dirKey = (dir: string): string => {
     let p = dir.startsWith('$HOME/') ? os.homedir() + dir.slice('$HOME'.length) : dir;
-    try { p = fs.realpathSync(p); } catch { /* not on disk: key the spelling */ }
+    // [gsd-local] A missing leaf (e.g. <config>/hooks not created yet) must not
+    // drop the symlink resolution of its parents: realpath the nearest existing
+    // ancestor and re-append the missing tail, so link-vs-real still agrees.
+    const tail: string[] = [];
+    let head = p;
+    for (;;) {
+      try { p = path.join(fs.realpathSync(head), ...tail.reverse()); break; } catch { /* not on disk */ }
+      const parent = path.dirname(head);
+      if (parent === head) break; // nothing exists: key the spelling
+      tail.push(path.basename(head));
+      head = parent;
+    }
     return shellCmdProjection.toComparablePathKey(p);
   };
   const ownedKey = dirKey(path.join(configDir, 'hooks'));
