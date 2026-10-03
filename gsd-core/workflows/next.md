@@ -30,6 +30,11 @@ Extract:
 - `progress` — overall percentage
 - `status` — active, paused, etc.
 
+If the JSON carries `frontmatter_error`, STOP and report it verbatim: the STATE.md
+frontmatter could not be read, so `status`/`current_phase` above are body fallbacks
+(often `"unknown"`), not the recorded state. Ask the user to fix the frontmatter
+before routing.
+
 If no `.planning/` directory exists:
 ```
 No GSD project detected. Run `/gsd:new-project` to get started.

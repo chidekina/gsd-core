@@ -78,7 +78,17 @@ Manage `.planning/STATE.md` — the project's living memory.
 # Load full project config + state as JSON
 node gsd-tools.cjs state load
 
-# Output STATE.md frontmatter as JSON
+# Output STATE.md frontmatter as JSON. If the frontmatter block is unusable
+# (invalid YAML — the message `frontmatter get` reports — a list/scalar
+# instead of key: value pairs, or an unclosed `---` fence), the output
+# carries `frontmatter_error` and curated fields fall back to body-derived
+# values. `state load`, `state get` and `state-snapshot` carry the same key;
+# `state validate` reports it as S010. With --raw, `state load`, `state get`
+# and `state-snapshot` print plain text that cannot carry the key, so they
+# print `frontmatter_error: <message>` on stderr; exit stays 0. (`state json
+# --raw` is still JSON and keeps the key in stdout.)
+# Asymmetry: `frontmatter get` reports only invalid YAML, as `error`; the
+# state verbs report all three cases, as `frontmatter_error`.
 node gsd-tools.cjs state json
 
 # Update a single field. Frontmatter keys are projections of body fields —

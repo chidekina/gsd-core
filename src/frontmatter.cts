@@ -113,6 +113,17 @@ type FullLineCommentChannel = { leading: Record<string, string[]>; trailing: str
  */
 const FRONTMATTER_UNPARSEABLE = Symbol('frontmatterUnparseable');
 
+/**
+ * The one diagnostic every read surface reports when a frontmatter block carries the
+ * FRONTMATTER_UNPARSEABLE marker (`frontmatter get`'s `error`, `state json`'s
+ * `frontmatter_error`). One string, so the two surfaces cannot drift apart.
+ */
+const FRONTMATTER_UNPARSEABLE_MESSAGE = 'Frontmatter is not parseable YAML — fix the syntax error in the frontmatter block';
+/** `frontmatterDiagnostic`: a byte-0 fence that never closes, with key-shaped lines inside. */
+const FRONTMATTER_UNTERMINATED_MESSAGE = 'Frontmatter opens with "---" but never closes — add the closing "---" line';
+/** `frontmatterDiagnostic`: the fenced block parses, but to a list or scalar, not key: value pairs. */
+const FRONTMATTER_NOT_MAPPING_MESSAGE = 'Frontmatter is not a YAML mapping — write it as key: value lines';
+
 function unparseableResult(): Frontmatter {
   // Plain-prototype (post-remote-runner-fix, #3881): the PUBLIC parse surface must keep
   // handing callers ordinary `{}`-shaped objects — `assert.deepStrictEqual` compares
@@ -737,6 +748,53 @@ function extractFrontmatter(content: string, sourcePath?: string): Frontmatter {
   } catch {
     return unparseableResult();
   }
+}
+
+/**
+ * Why a document's frontmatter could not be used, or `null` when it is fine or absent.
+ *
+ * `extractFrontmatter` returns `{}` for every unusable shape — only the YAML-syntax case
+ * carries the FRONTMATTER_UNPARSEABLE marker, and an unclosed fence warns on stderr only at
+ * UNTERMINATED_KEY_THRESHOLD keys. A read surface that reports document state (`state json`,
+ * `state load`, …) needs one answer for all of them, so it can name the cause in-band instead
+ * of serving body-derived fallbacks as if they were the curated values:
+ *
+ *  - fenced block that fails to parse → FRONTMATTER_UNPARSEABLE_MESSAGE
+ *  - fenced block that parses to a list or scalar → FRONTMATTER_NOT_MAPPING_MESSAGE
+ *  - byte-0 fence never closed, with at least one key and every line frontmatter-shaped
+ *    → FRONTMATTER_UNTERMINATED_MESSAGE (the same shape guard as the stderr warning, so a
+ *    document that merely opens with a thematic break stays silent)
+ *
+ * No fence, empty fences, and whitespace- or comment-only fences are not errors (they parse
+ * to nothing). Two consequences of the FAILSAFE schema, documented rather than special-cased:
+ * a lone `~` is the STRING "~" there, not null, so it reports as not-a-mapping; and a
+ * document that opens with a thematic break, then prose, then a second `---` is a fenced
+ * block holding a scalar, so it reports as not-a-mapping too. Pure; never throws.
+ */
+function frontmatterDiagnostic(content: string): string | null {
+  const found = frontmatterRegion(content);
+  if (!found) return null;
+  if (!found.terminated) {
+    return countKeysBeforeTruncation(found.region) >= 1 && isFrontmatterShaped(found.region)
+      ? FRONTMATTER_UNTERMINATED_MESSAGE
+      : null;
+  }
+  const fm = extractFrontmatter(content);
+  if ((fm as unknown as Record<symbol, unknown>)[FRONTMATTER_UNPARSEABLE] === true) {
+    return FRONTMATTER_UNPARSEABLE_MESSAGE;
+  }
+  if (Object.keys(fm).length > 0) return null;
+  // Parsed cleanly to no keys: either a mapping-free document (null) or a list/scalar.
+  let raw: unknown;
+  try {
+    raw = loadWithAmbiguousColonRepair(escapeNullBytesForParse(found.region));
+  } catch {
+    // Not reached in practice: extractFrontmatter just parsed this same region without
+    // setting the marker. The YAML-syntax verdict belongs to that marker alone.
+    return null;
+  }
+  if (raw === null || raw === undefined) return null;
+  return typeof raw === 'object' && !Array.isArray(raw) ? null : FRONTMATTER_NOT_MAPPING_MESSAGE;
 }
 
 /**
@@ -1383,7 +1441,7 @@ function cmdFrontmatterGet(cwd: string, filePath: string, field: string | undefi
   // "Field not found" tells the caller the key is absent, which is
   // indistinguishable from a file that genuinely lacks it.
   if ((fm as unknown as Record<symbol, unknown>)[FRONTMATTER_UNPARSEABLE] === true) {
-    output({ error: 'Frontmatter is not parseable YAML — fix the syntax error in the frontmatter block', path: filePath }, raw, undefined);
+    output({ error: FRONTMATTER_UNPARSEABLE_MESSAGE, path: filePath }, raw, undefined);
     return;
   }
   if (field) {
@@ -1574,6 +1632,10 @@ export = {
   // ADR-3473 §8.1 (#3881, consequence 2): the unparseable-vs-empty marker Symbol. Exported so
   // the 8 `hasFrontmatter` call sites named in the design can consult it in a follow-up change.
   FRONTMATTER_UNPARSEABLE,
+  FRONTMATTER_UNPARSEABLE_MESSAGE,
+  FRONTMATTER_UNTERMINATED_MESSAGE,
+  FRONTMATTER_NOT_MAPPING_MESSAGE,
+  frontmatterDiagnostic,
   // Additive alias (#644 prohibition-probe schema contract): the probe round-trip seam reads a
   // frontmatter object via `parseFrontmatter` (the name the contract test pins). It is the SAME
   // function as `extractFrontmatter` — a bare-object parse with no behavior change — exposed under

@@ -787,6 +787,58 @@ stopped_at: Plan 2 of Phase 3
     assert.strictEqual(output.stopped_at, 'Plan 2 of Phase 3', 'stopped_at from frontmatter');
   });
 
+  test('unparseable frontmatter is surfaced as frontmatter_error, not a silent "unknown"', () => {
+    // An unescaped inner quote makes the YAML block unparseable. Before, state json
+    // dropped every frontmatter field and reported status "unknown" with no signal.
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `---
+gsd_state_version: 1.0
+status: executing
+stopped_at: "Phase 3 "done" ok"
+---
+
+# Project State
+`
+    );
+
+    const result = runGsdTools('state json', tmpDir);
+    assert.ok(result.success, `Command should succeed (same exit semantics as frontmatter get): ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.ok(output.frontmatter_error, `frontmatter_error must be present; got: ${result.output}`);
+
+    // Same diagnostic `frontmatter get` reports for the same file.
+    const fmGet = JSON.parse(runGsdTools('frontmatter get .planning/STATE.md', tmpDir).output);
+    assert.ok(fmGet.error, 'control: frontmatter get must flag the same file');
+    assert.strictEqual(output.frontmatter_error, fmGet.error);
+    // Additive: the rebuilt state object is still emitted, and `error` keeps its
+    // "STATE.md not found" meaning for existing consumers.
+    assert.strictEqual(output.gsd_state_version, '1.0');
+    assert.strictEqual(output.error, undefined);
+  });
+
+  test('control: valid frontmatter carries no frontmatter_error', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'STATE.md'),
+      `---
+gsd_state_version: 1.0
+status: executing
+stopped_at: 'Phase 3 "done" ok'
+---
+
+# Project State
+`
+    );
+
+    const result = runGsdTools('state json', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.ok(!('frontmatter_error' in output), `no frontmatter_error expected; got: ${result.output}`);
+    // Same file parses: the curated values come through (proves the fixture is read).
+    assert.strictEqual(output.status, 'executing');
+    assert.strictEqual(output.stopped_at, 'Phase 3 "done" ok');
+  });
+
   test('normalizes various status values', () => {
     // #4186: recognition is an ANCHORED whole-field vocabulary match. The
     // vocabulary's own values normalize to their token; prefix/suffix NARRATIVE
@@ -815,6 +867,220 @@ stopped_at: Plan 2 of Phase 3
       const output = JSON.parse(result.output);
       assert.strictEqual(output.status, expected, `"${input}" should normalize to "${expected}"`);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unusable STATE.md frontmatter is named on every STATE read verb
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('state read verbs surface unusable frontmatter as frontmatter_error', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createFixture();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  const BAD_QUOTE = '---\ngsd_state_version: 1.0\nstatus: executing\nstopped_at: "Phase 3 "done" ok"\n---\n\n# Project State\n\n**Status:** Paused\n';
+  const VALID = '---\ngsd_state_version: 1.0\nstatus: executing\n---\n\n# Project State\n\n**Status:** Executing\n';
+  const writeStateMd = (content) => fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), content);
+  const json = (cmd) => {
+    const result = runGsdTools(cmd, tmpDir);
+    assert.ok(result.success, `${cmd} failed: ${result.error}`);
+    return JSON.parse(result.output);
+  };
+
+  // ── state json: the shapes that used to collapse to {} without a signal ──
+  const surfaced = [
+    ['unclosed fence below the warning threshold (one key)', '---\nstatus: executing\n', 'FRONTMATTER_UNTERMINATED_MESSAGE'],
+    ['a YAML list instead of a mapping', '---\n- status: executing\n- current_phase: 3\n---\n\n# Project State\n', 'FRONTMATTER_NOT_MAPPING_MESSAGE'],
+    ['a bare scalar instead of a mapping', '---\njust some text\n---\n\n# Project State\n', 'FRONTMATTER_NOT_MAPPING_MESSAGE'],
+  ];
+  for (const [label, content, constant] of surfaced) {
+    test(`state json: ${label} is surfaced`, () => {
+      writeStateMd(content);
+      const out = json('state json');
+      assert.ok(out.frontmatter_error, `frontmatter_error must be present; got ${JSON.stringify(out)}`);
+      assert.strictEqual(out.frontmatter_error, frontmatterLib[constant]);
+    });
+  }
+
+  // ── no-false-positive controls ──
+  const clean = [
+    ['no frontmatter at all', '# Project State\n\n**Status:** Executing\n'],
+    ['empty fences', '---\n---\n\n# Project State\n'],
+    ['a blank line between the fences', '---\n\n---\n\n# Project State\n'],
+    ['a document that merely opens with a thematic break', '---\n# Project State\n\nSome prose.\n'],
+    ['a thematic break above a labelled preamble and prose (no closing fence)', '---\nAuthor: Jane Doe\n\nOrdinary prose, and no second fence anywhere.\n'],
+    ['valid frontmatter', VALID],
+  ];
+  for (const [label, content] of clean) {
+    test(`control: state json — ${label} carries no frontmatter_error`, () => {
+      writeStateMd(content);
+      const out = json('state json');
+      assert.ok(!('frontmatter_error' in out), `unexpected frontmatter_error: ${JSON.stringify(out)}`);
+      assert.strictEqual(out.gsd_state_version, '1.0', 'the state object is still emitted');
+    });
+  }
+
+  // ── the other STATE read verbs report the same condition the same way ──
+  const verbs = [
+    ['state load', 'state load'],
+    ['state get (whole file)', 'state get'],
+    ['state get <field>', 'state get Status'],
+    ['state-snapshot', 'state-snapshot'],
+  ];
+  for (const [label, cmd] of verbs) {
+    test(`${label}: unparseable frontmatter is surfaced`, () => {
+      writeStateMd(BAD_QUOTE);
+      const out = json(cmd);
+      assert.ok(out.frontmatter_error, `frontmatter_error must be present; got ${JSON.stringify(out).slice(0, 300)}`);
+      assert.strictEqual(out.frontmatter_error, json('state json').frontmatter_error, 'same diagnostic as state json');
+    });
+    test(`control: ${label} — valid frontmatter carries no frontmatter_error`, () => {
+      writeStateMd(VALID);
+      const out = json(cmd);
+      assert.ok(!('frontmatter_error' in out), `unexpected frontmatter_error: ${JSON.stringify(out).slice(0, 300)}`);
+    });
+  }
+
+  test('state validate: unparseable frontmatter is an S010 warning', () => {
+    writeStateMd(BAD_QUOTE);
+    const result = runGsdTools('state validate', tmpDir);
+    const out = JSON.parse(result.output);
+    const s010 = (out.warnings || []).find((w) => w.code === 'S010');
+    assert.ok(s010, `S010 must fire; got ${JSON.stringify(out.warnings)}`);
+    assert.strictEqual(s010.message.includes(json('state json').frontmatter_error), true);
+  });
+
+  test('control: state validate — valid frontmatter has no S010', () => {
+    writeStateMd(VALID);
+    const out = JSON.parse(runGsdTools('state validate', tmpDir).output);
+    assert.ok(Array.isArray(out.warnings), 'validate must report a warnings array');
+    assert.ok(!out.warnings.some((w) => w.code === 'S010'), JSON.stringify(out.warnings));
+  });
+
+  // --raw prints plain text, so the in-band key cannot travel; the diagnostic goes to stderr
+  // (exit stays 0 so existing `$(… --raw)` callers keep working).
+  const runRaw = (args) => {
+    const { spawnSync } = require('child_process');
+    const { TOOLS_PATH } = require('./helpers.cjs');
+    const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+    const env = { ...process.env };
+    delete env.GSD_PROJECT;
+    delete env.GSD_WORKSTREAM;
+    return spawnSync(process.execPath, [TOOLS_PATH, ...args], { cwd: tmpDir, encoding: 'utf-8', env, timeout: PROBE_TIMEOUT_MS });
+  };
+  for (const args of [['state', 'get', 'Status', '--raw'], ['state', 'load', '--raw'], ['state', 'get', '--raw']]) {
+    test(`${args.join(' ')}: unusable frontmatter is reported on stderr, exit 0`, () => {
+      writeStateMd(BAD_QUOTE);
+      const r = runRaw(args);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.ok(r.stderr.includes('frontmatter_error'), `stderr must name frontmatter_error; got: ${r.stderr}`);
+      assert.ok(r.stderr.includes(frontmatterLib.FRONTMATTER_UNPARSEABLE_MESSAGE), r.stderr);
+      assert.ok(!r.stdout.includes('frontmatter_error'), 'stdout stays the plain raw value');
+    });
+    test(`control: ${args.join(' ')} — valid frontmatter writes no frontmatter_error to stderr`, () => {
+      writeStateMd(VALID);
+      const r = runRaw(args);
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.ok(r.stdout.length > 0, 'the raw value is still printed');
+      assert.ok(!r.stderr.includes('frontmatter_error'), r.stderr);
+    });
+  }
+
+  test('documented edge: `~` alone is a string under the FAILSAFE schema, so it is not a mapping', () => {
+    writeStateMd('---\n~\n---\n\n# Project State\n');
+    assert.strictEqual(json('state json').frontmatter_error, frontmatterLib.FRONTMATTER_NOT_MAPPING_MESSAGE);
+  });
+
+  test('documented edge: a thematic break, prose, then a second `---` reads as a scalar frontmatter block', () => {
+    writeStateMd('---\nSome intro prose.\n---\n\n# Project State\n');
+    assert.strictEqual(json('state json').frontmatter_error, frontmatterLib.FRONTMATTER_NOT_MAPPING_MESSAGE);
+  });
+
+  test('workflows/new-milestone.md does not discard stderr of the raw milestone read', () => {
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'new-milestone.md'), 'utf-8');
+    const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+    const line = splitLines(md).find((l) => l.includes('state.get milestone --raw'));
+    assert.ok(line, 'the outgoing-milestone read must exist');
+    assert.ok(!line.includes('2>/dev/null'), `stderr must reach the workflow: ${line}`);
+    assert.ok(md.includes('frontmatter_error'), 'the workflow must say what to do with it');
+    // The stop must act BEFORE the switch: the read and the switch run in one bash block,
+    // so a prose STOP placed after the block comes too late.
+    const guardAt = md.indexOf("grep -q '^frontmatter_error:'");
+    const switchAt = md.indexOf('gsd_run query state.milestone-switch');
+    assert.ok(guardAt > 0, 'the workflow must check the read for frontmatter_error in shell');
+    assert.ok(guardAt < switchAt, 'the frontmatter_error guard must run before state.milestone-switch');
+  });
+
+  // Execute the real outgoing-milestone block from new-milestone.md (not a string-order check):
+  // the read runs against the real CLI; only state.milestone-switch is stubbed to a marker line.
+  const runNewMilestoneBlock = (extraEnv = {}) => {
+    const { spawnSync } = require('child_process');
+    const { TOOLS_PATH } = require('./helpers.cjs');
+    const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'new-milestone.md'), 'utf-8');
+    // Line scan, not a fence regex: take the bash fence that holds the outgoing-milestone read.
+    const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+    const lines = splitLines(md);
+    const readAt = lines.findIndex((l) => l.includes('state.get milestone --raw'));
+    let open = readAt;
+    while (open >= 0 && lines[open].trim() !== '```bash') open--;
+    let close = readAt;
+    while (close >= 0 && close < lines.length && lines[close].trim() !== '```') close++;
+    const block = readAt >= 0 && open >= 0 && close < lines.length ? lines.slice(open + 1, close).join('\n') : '';
+    assert.ok(block.includes('state.milestone-switch'), 'the outgoing-milestone bash block must exist');
+    const stub = `gsd_run() { if [ "$1" = query ] && [ "$2" = state.milestone-switch ]; then echo "SWITCH_REACHED"; return 0; fi; node ${JSON.stringify(TOOLS_PATH)} "$@"; }\n`;
+    const env = { ...process.env, ...extraEnv };
+    delete env.GSD_PROJECT;
+    delete env.GSD_WORKSTREAM;
+    return spawnSync('bash', ['-c', stub + block], { cwd: tmpDir, encoding: 'utf-8', env, timeout: PROBE_TIMEOUT_MS });
+  };
+  const bashTest = process.platform === 'win32' ? test.skip : test;
+
+  bashTest('new-milestone block: unusable frontmatter stops before the switch (exit 1)', () => {
+    writeStateMd('---\nmilestone: v1.0\nstopped_at: "a "b" c"\n---\n\n# Project State\n');
+    const r = runNewMilestoneBlock();
+    assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes('SWITCH_REACHED'), 'the switch must not run');
+    assert.ok(r.stderr.includes('frontmatter_error:'), r.stderr);
+  });
+
+  bashTest('new-milestone block: valid frontmatter reaches the switch with the outgoing version', () => {
+    writeStateMd('---\nmilestone: v1.0\n---\n\n# Project State\n');
+    const r = runNewMilestoneBlock();
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.ok(r.stdout.includes('SWITCH_REACHED'), r.stdout);
+    assert.ok(r.stdout.includes('in step 6): v1.0'), r.stdout);
+  });
+
+  bashTest('new-milestone block: a missing STATE.md continues with <unknown>', () => {
+    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
+    if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+    const r = runNewMilestoneBlock();
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.ok(r.stdout.includes('SWITCH_REACHED'), r.stdout);
+    assert.ok(r.stdout.includes('<unknown>'), r.stdout);
+  });
+
+  bashTest('new-milestone block: a failing mktemp fails CLOSED (exit 1, no switch)', () => {
+    writeStateMd('---\nmilestone: v1.0\n---\n\n# Project State\n');
+    const r = runNewMilestoneBlock({ TMPDIR: path.join(tmpDir, 'does-not-exist') });
+    assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes('SWITCH_REACHED'), 'the switch must not run');
+  });
+
+  test('workflows/next.md stops on frontmatter_error before routing', () => {
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'next.md'), 'utf-8');
+    const start = md.indexOf('gsd_run query state.json');
+    const end = md.indexOf('If no `.planning/` directory exists');
+    assert.ok(start > 0 && end > start, 'next.md state-read block must exist');
+    assert.ok(md.slice(start, end).includes('frontmatter_error'), 'the state-read block must check frontmatter_error');
   });
 });
 

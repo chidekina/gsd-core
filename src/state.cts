@@ -47,7 +47,7 @@ const { planningDir, planningPaths, resolvePhaseIdConvention } = planningWorkspa
 import { realClock } from './clock.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import frontmatter = require('./frontmatter.cjs');
-const { extractFrontmatter, reconstructFrontmatter, stripFrontmatter, propagateCommentChannel, FRONTMATTER_UNPARSEABLE } = frontmatter;
+const { extractFrontmatter, reconstructFrontmatter, stripFrontmatter, propagateCommentChannel, FRONTMATTER_UNPARSEABLE, frontmatterDiagnostic } = frontmatter;
 
 /**
  * ADR-3473 §8.1 (#3881, consequence 2 wiring): does `existingFm` carry the
@@ -59,6 +59,24 @@ const { extractFrontmatter, reconstructFrontmatter, stripFrontmatter, propagateC
  */
 function isUnparseableFrontmatter(existingFm: Record<string, unknown>): boolean {
   return (existingFm as unknown as Record<symbol, unknown>)[FRONTMATTER_UNPARSEABLE] === true;
+}
+
+/**
+ * The STATE read verbs (`state json`, `state load`, `state get`, `state-snapshot`) name an
+ * unusable frontmatter block in-band as `frontmatter_error` — the same message
+ * `frontmatter get` reports for the YAML-syntax case. Additive: the key is absent when the
+ * frontmatter is fine or absent, and `error` keeps its existing meaning on every verb.
+ * In-band rather than stderr because `workflows/next.md` discards stderr.
+ *
+ * `--raw` prints a bare value, which cannot carry the key, so in raw mode the same
+ * diagnostic is ALSO written to stderr as `frontmatter_error: <message>`. Exit status is
+ * unchanged (0), so existing `$(… --raw)` captures keep working.
+ */
+function withFrontmatterError<T extends object>(result: T, content: string, raw = false): T & { frontmatter_error?: string } {
+  const diagnostic = frontmatterDiagnostic(content);
+  if (!diagnostic) return result;
+  if (raw) process.stderr.write(`frontmatter_error: ${diagnostic} (STATE.md)\n`);
+  return { ...result, frontmatter_error: diagnostic };
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import scanPhasePlans = require('./plan-scan.cjs');
@@ -546,6 +564,8 @@ function cmdStateLoad(cwd: string, raw: boolean): void {
     debug_dir: toPosixPath(paths.debug),
   };
 
+  const withDiagnostic = withFrontmatterError(result, stateRaw, raw);
+
   // For --raw, output a condensed key=value format
   if (raw) {
     const c = config as Record<string, string | boolean | undefined>;
@@ -567,7 +587,7 @@ function cmdStateLoad(cwd: string, raw: boolean): void {
     throw new ExitError(0);
   }
 
-  output(result, false, undefined);
+  output(withDiagnostic, false, undefined);
 }
 
 function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): void {
@@ -580,7 +600,7 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
   {
 
     if (!section) {
-      output({ content }, raw, content);
+      output(withFrontmatterError({ content }, content, raw), raw, content);
       return;
     }
 
@@ -591,7 +611,7 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
     const boldPattern = new RegExp(`^[ \\t]*\\*\\*${fieldEscaped}:\\*\\*[ \\t]*(.*)`, 'im');
     const boldMatch = content.match(boldPattern);
     if (boldMatch) {
-      output({ [section]: boldMatch[1].trim() }, raw, boldMatch[1].trim());
+      output(withFrontmatterError({ [section]: boldMatch[1].trim() }, content, raw), raw, boldMatch[1].trim());
       return;
     }
 
@@ -599,7 +619,7 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
     const plainPattern = new RegExp(`^${fieldEscaped}:\\s*(.*)`, 'im');
     const plainMatch = content.match(plainPattern);
     if (plainMatch) {
-      output({ [section]: plainMatch[1].trim() }, raw, plainMatch[1].trim());
+      output(withFrontmatterError({ [section]: plainMatch[1].trim() }, content, raw), raw, plainMatch[1].trim());
       return;
     }
 
@@ -607,11 +627,11 @@ function cmdStateGet(cwd: string, section: string | undefined, raw: boolean): vo
     const sectionPattern = new RegExp(`##\\s*${fieldEscaped}\\s*\n([\\s\\S]*?)(?=\\n##|$)`, 'i');
     const sectionMatch = content.match(sectionPattern);
     if (sectionMatch) {
-      output({ [section]: sectionMatch[1].trim() }, raw, sectionMatch[1].trim());
+      output(withFrontmatterError({ [section]: sectionMatch[1].trim() }, content, raw), raw, sectionMatch[1].trim());
       return;
     }
 
-    output({ error: `Section or field "${section}" not found` }, raw, '');
+    output(withFrontmatterError({ error: `Section or field "${section}" not found` }, content, raw), raw, '');
   }
 }
 
@@ -2568,7 +2588,7 @@ function cmdStateSnapshot(cwd: string, raw: boolean): void {
     session,
   };
 
-  output(result, raw, undefined);
+  output(withFrontmatterError(result, content, raw), raw, undefined);
 }
 
 // ─── State Frontmatter Sync ──────────────────────────────────────────────────
@@ -5101,7 +5121,11 @@ function cmdStateJson(cwd: string, raw: boolean): void {
   // syncStateFrontmatter guard so the read path agrees with the write path.
   preferNewerLastActivity(existingFm, built);
 
-  output(built, raw, JSON.stringify(built, null, 2));
+  // An unusable frontmatter block reads as `{}`, so every curated field above
+  // silently fell back to body/defaults (e.g. status "unknown"). Name the cause
+  // in-band (see withFrontmatterError).
+  const result = withFrontmatterError(built, content);
+  output(result, raw, JSON.stringify(result, null, 2));
 }
 
 /**
@@ -5758,6 +5782,18 @@ function cmdStateValidate(cwd: string, raw: boolean, opts: { strict?: boolean } 
   // diagnostic rather than reported under a content digest.
   const { fm, body, scope: initialScope } = readStateFrontmatterScoped(content, statePath);
   const scope: planningScopeMod.Scope = initialScope;
+
+  // S010: the frontmatter block is unusable, so every field below is read from the body
+  // alone. Same diagnostic the read verbs report as `frontmatter_error`.
+  const frontmatterProblem = frontmatterDiagnostic(content);
+  if (frontmatterProblem) {
+    warnings.push(stateDiagnostic(
+      'S010',
+      SEVERITY.WARNING,
+      `STATE.md frontmatter is unusable: ${frontmatterProblem}`,
+      'Fix the STATE.md frontmatter block so its fields are read instead of body fallbacks',
+    ));
+  }
 
   const status = stateFieldValue(fm, body, 'status', 'Status').value || '';
   const resolvedPhase = resolveStatePhase(fm, body);
