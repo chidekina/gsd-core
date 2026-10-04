@@ -45,11 +45,16 @@ function enclosingString(line, at) {
 }
 
 // True when `at` is inside a string literal that is an argument of a printing command.
+const SHELL_PIPE = /\|&?\s*\(?\s*(?:(?:sudo|env|exec|command|xargs|busybox|nohup)\s+(?:-\S+\s+)*)*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|mksh|ash|fish)\b/;
+
 function insideProse(line, at) {
   const open = enclosingString(line, at);
   if (open < 0) return false;
-  // Prose piped into a shell executes (`echo "a; node x" | sh`): not prose.
-  if (/\|&?\s*(?:sh|bash|zsh)\b/.test(line)) return false;
+  // Prose piped into a shell executes (`echo "a; node x" | sh`): not prose. Covers an
+  // absolute path (`| /bin/sh`), a subshell `(`, wrappers (`| sudo bash`, `| env bash`,
+  // `| xargs sh -c`, `| busybox sh`) and the common shells. Over-flags such as
+  // `| tee bash.log` are accepted: a false positive costs a look, a miss ships a bare node.
+  if (SHELL_PIPE.test(line)) return false;
   const seg = line.slice(0, open).split(/[;&|(`]/).pop().trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*/, '');
   return PRINTERS.has(seg.split(/\s+/)[0]);
 }

@@ -422,10 +422,17 @@ describe('[gsd-local] bareNodeLines ignores prose inside string literals', () =>
   }
   // Prose piped into a shell executes, so a printer's string is not prose there.
   const PIPED_TO_SHELL = ['echo "cd d && node x" | sh', 'echo "a; node x" | sh', "printf '%s' \"..; node x\" | bash",
-    'echo "a; node x" | sh -s', 'echo "a; node x" |& bash -s', 'echo "a; node x" | zsh'];
+    'echo "a; node x" | sh -s', 'echo "a; node x" |& bash -s', 'echo "a; node x" | zsh',
+    // review gsd-core#8: wrappers, absolute paths and other shells still execute the string
+    'echo "a; node x" | sudo bash', 'echo "a; node x" | env bash', 'echo "a; node x" | /bin/sh',
+    'echo "a; node x" | dash', 'echo "a; node x" | ksh', 'echo "a; node x" | (sh)',
+    'echo "a; node x" | xargs sh -c', 'echo "a; node x" | busybox sh'];
   for (const line of PIPED_TO_SHELL) {
     test(`printer piped into a shell still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
   }
+  // Named ceiling: a printed string that only runs LATER (written to a file, then executed)
+  // is not tracked — the filter is per line. Over-flags like `| tee bash.log` are accepted.
+  test('ceiling: echo "a; node x" > f.sh is not detected (printed, run later)', () => assert.strictEqual(hits('echo "a; node x" > f.sh'), 0));
   // Named ceiling, NOT a regression: the old detector scored 0 here too.
   test('ceiling: eval "$(echo "node x")" is not detected (old detector also 0)', () => assert.strictEqual(hits('eval "$(echo "node x")"'), 0));
   test('multi-line string: closing quote is not read as an opening one', () => {
