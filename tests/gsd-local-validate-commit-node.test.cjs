@@ -412,6 +412,18 @@ describe('[gsd-local] bareNodeLines ignores prose inside string literals', () =>
   for (const line of PROSE) {
     test(`prose not flagged: ${line}`, () => assert.strictEqual(hits(line), 0, line));
   }
+  // Strings handed to a shell run as code, so they are NEVER prose (regression review of #8).
+  const SHELL_STRINGS = [
+    'bash -c "cd d && node x.js"', "sh -c 'echo a; node -e 1'", 'ssh h "cd /r && node s.js"',
+    'bash -c "if true; then node x; fi"', '"command": "bash -c \\"cd x && node a.js\\""',
+  ];
+  for (const line of SHELL_STRINGS) {
+    test(`shell string still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
+  }
+  test('multi-line string: closing quote is not read as an opening one', () => {
+    assert.strictEqual(bareNodeLines('foo "multi\nline"; node x.js').length, 1);
+  });
+  test('echo "use: node -e x" (vacuous control: the old detector also scored 0)', () => assert.strictEqual(hits('echo "use: node -e x"'), 0));
   // Forged positives: a real call must still fire, including one living inside
   // a quoted command substitution or after a quoted segment.
   const REAL = [

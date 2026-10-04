@@ -13,24 +13,43 @@
 // script path (`node script.js`).
 const BARE_NODE_RE = /(^|\$\(|`|[|;&!]|&&|\|\||\b(?:if|then|else|elif|do|while|until|exec|env|command|time)\s)\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*node\s+(-e\b|-p\b|--eval\b|--input-type|["'$]|[^\s-])/;
 
-// True when index `at` of `line` sits inside a string literal as prose: inside '...',
-// or inside "..." but not within a `$(...)` / backtick substitution opened in it (those
-// execute, so a node there is a real call). Escapes honoured; unterminated quote = open.
-function insideProse(line, at) {
-  const stack = []; // 's' single, 'd' double, 'c' $( ), 'b' backtick
-  for (let i = 0; i < at; i++) {
+// Commands that only PRINT their arguments, never execute them: a string handed to one
+// of these is prose. Anything else (bash -c, sh -c, ssh host, eval, su -c, unknown
+// wrappers, a JSON "command" value) may run its string as code, so it is never skipped.
+const PRINTERS = new Set(['echo', 'printf', 'warn', 'log', 'die', 'msg', 'info', 'error', 'fail', 'print']);
+
+// Scan the whole line. Returns the opener index of the string that contains `at`
+// (quote state: single/double; a `$(...)` or backtick opened inside a double quote
+// executes, so it is not "in" the string), or -1. A line with an unbalanced quote
+// (multi-line string) yields -1 everywhere: only spans that open AND close on this
+// line are ever skipped.
+function enclosingString(line, at) {
+  const stack = []; // {t: 's'|'d'|'c'|'b', i}
+  let found = -1;
+  for (let i = 0; i < line.length; i++) {
+    if (i === at) {
+      const top = stack[stack.length - 1];
+      if (top && (top.t === 's' || top.t === 'd')) found = top.i;
+    }
     const top = stack[stack.length - 1];
     const ch = line[i];
-    if (ch === '\\' && top !== 's') { i++; continue; }
-    if (top === 's') { if (ch === "'") stack.pop(); continue; }
-    if (ch === '$' && line[i + 1] === '(' && top !== 'b') { stack.push('c'); i++; continue; }
-    if (ch === ')' && top === 'c') { stack.pop(); continue; }
-    if (ch === '`') { if (top === 'b') stack.pop(); else stack.push('b'); continue; }
-    if (ch === '"') { if (top === 'd') stack.pop(); else stack.push('d'); continue; }
-    if (ch === "'" && top !== 'd') { stack.push('s'); continue; }
+    if (ch === '\\' && (!top || top.t !== 's')) { i++; continue; }
+    if (top && top.t === 's') { if (ch === "'") stack.pop(); continue; }
+    if (ch === '$' && line[i + 1] === '(' && !(top && top.t === 'b')) { stack.push({ t: 'c', i }); i++; continue; }
+    if (ch === ')' && top && top.t === 'c') { stack.pop(); continue; }
+    if (ch === '`') { if (top && top.t === 'b') stack.pop(); else stack.push({ t: 'b', i }); continue; }
+    if (ch === '"') { if (top && top.t === 'd') stack.pop(); else stack.push({ t: 'd', i }); continue; }
+    if (ch === "'" && !(top && top.t === 'd')) { stack.push({ t: 's', i }); continue; }
   }
-  const top = stack[stack.length - 1];
-  return top === 's' || top === 'd';
+  return stack.length ? -1 : found;
+}
+
+// True when `at` is inside a string literal that is an argument of a printing command.
+function insideProse(line, at) {
+  const open = enclosingString(line, at);
+  if (open < 0) return false;
+  const seg = line.slice(0, open).split(/[;&|(`]/).pop().trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*/, '');
+  return PRINTERS.has(seg.split(/\s+/)[0]);
 }
 
 // A line is a hit when at least one match of the call shape is NOT prose.
