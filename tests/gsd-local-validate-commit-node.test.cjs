@@ -426,7 +426,14 @@ describe('[gsd-local] bareNodeLines ignores prose inside string literals', () =>
     // review gsd-core#8: wrappers, absolute paths and other shells still execute the string
     'echo "a; node x" | sudo bash', 'echo "a; node x" | env bash', 'echo "a; node x" | /bin/sh',
     'echo "a; node x" | dash', 'echo "a; node x" | ksh', 'echo "a; node x" | (sh)',
-    'echo "a; node x" | xargs sh -c', 'echo "a; node x" | busybox sh'];
+    'echo "a; node x" | xargs sh -c', 'echo "a; node x" | busybox sh',
+    // re-review: wrapper arguments and paths
+    'echo "a; node x" | sudo -u root bash', 'echo "a; node x" | env FOO=1 bash', 'echo "a; node x" | /usr/bin/env bash',
+    'echo "a; node x" | ssh h bash', 'echo "a; node x" | su -c sh'];
+  test('pipe followed by a long run of spaces stays linear', () => {
+    const line = 'echo "a; node x" |' + ' '.repeat(50000) + 'x';
+    const t0 = Date.now(); hits(line); assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  });
   for (const line of PIPED_TO_SHELL) {
     test(`printer piped into a shell still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
   }

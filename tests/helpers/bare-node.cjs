@@ -45,7 +45,20 @@ function enclosingString(line, at) {
 }
 
 // True when `at` is inside a string literal that is an argument of a printing command.
-const SHELL_PIPE = /\|&?\s*\(?\s*(?:(?:sudo|env|exec|command|xargs|busybox|nohup)\s+(?:-\S+\s+)*)*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|mksh|ash|fish)\b/;
+// A shell name as a whole word (optionally after a path or `(`) inside one pipe segment.
+const SHELL_WORD = /(?:^|[\s(/])(?:sh|bash|zsh|dash|ksh|mksh|ash|fish)(?=$|[\s)])/;
+// True when any segment after a `|` (up to the next ; & |) runs a shell: covers wrappers
+// with arguments (`| sudo -u root bash`, `| env FOO=1 bash`, `| /usr/bin/env bash`,
+// `| ssh h bash`, `| su -c sh`, `| xargs sh -c`). Split first, then one flat regex per
+// segment: linear, no nested quantifiers (a `|` + 50k spaces was quadratic before).
+function pipesIntoShell(line) {
+  const parts = line.split('|');
+  for (let i = 1; i < parts.length; i++) {
+    const seg = parts[i].replace(/^&/, '').split(/[;&]/)[0];
+    if (SHELL_WORD.test(seg)) return true;
+  }
+  return false;
+}
 
 function insideProse(line, at) {
   const open = enclosingString(line, at);
@@ -53,8 +66,8 @@ function insideProse(line, at) {
   // Prose piped into a shell executes (`echo "a; node x" | sh`): not prose. Covers an
   // absolute path (`| /bin/sh`), a subshell `(`, wrappers (`| sudo bash`, `| env bash`,
   // `| xargs sh -c`, `| busybox sh`) and the common shells. Over-flags such as
-  // `| tee bash.log` are accepted: a false positive costs a look, a miss ships a bare node.
-  if (SHELL_PIPE.test(line)) return false;
+  // `| grep bash` are accepted: a false positive costs a look, a miss ships a bare node.
+  if (pipesIntoShell(line)) return false;
   const seg = line.slice(0, open).split(/[;&|(`]/).pop().trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*/, '');
   return PRINTERS.has(seg.split(/\s+/)[0]);
 }
