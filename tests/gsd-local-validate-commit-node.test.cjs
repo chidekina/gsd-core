@@ -420,6 +420,14 @@ describe('[gsd-local] bareNodeLines ignores prose inside string literals', () =>
   for (const line of SHELL_STRINGS) {
     test(`shell string still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
   }
+  // Prose piped into a shell executes, so a printer's string is not prose there.
+  const PIPED_TO_SHELL = ['echo "cd d && node x" | sh', 'echo "a; node x" | sh', "printf '%s' \"..; node x\" | bash",
+    'echo "a; node x" | sh -s', 'echo "a; node x" |& bash -s', 'echo "a; node x" | zsh'];
+  for (const line of PIPED_TO_SHELL) {
+    test(`printer piped into a shell still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
+  }
+  // Named ceiling, NOT a regression: the old detector scored 0 here too.
+  test('ceiling: eval "$(echo "node x")" is not detected (old detector also 0)', () => assert.strictEqual(hits('eval "$(echo "node x")"'), 0));
   test('multi-line string: closing quote is not read as an opening one', () => {
     assert.strictEqual(bareNodeLines('foo "multi\nline"; node x.js').length, 1);
   });

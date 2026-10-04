@@ -48,6 +48,8 @@ function enclosingString(line, at) {
 function insideProse(line, at) {
   const open = enclosingString(line, at);
   if (open < 0) return false;
+  // Prose piped into a shell executes (`echo "a; node x" | sh`): not prose.
+  if (/\|&?\s*(?:sh|bash|zsh)\b/.test(line)) return false;
   const seg = line.slice(0, open).split(/[;&|(`]/).pop().trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*/, '');
   return PRINTERS.has(seg.split(/\s+/)[0]);
 }
