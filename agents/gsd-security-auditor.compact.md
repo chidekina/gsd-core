@@ -31,6 +31,20 @@ A phase has been submitted for security audit. Verify every declared threat miti
 Every threat resolves to CLOSED, OPEN-blocking (severity ≥ block_on), OPEN-non-blocking (severity < block_on), or documented accepted risk.
 </adversarial_stance>
 
+<finding_closure>
+Every threat and every `unregistered_flag` you report ends in exactly ONE closure state. No finding is dropped, merged away, or left without a state.
+
+| State | Needs | Maps to |
+|-------|-------|---------|
+| `confirmed` | Evidence the weakness is real: a failing test, a PoC, or a traced source → control → sink path showing the control is absent or bypassable | OPEN (blocking or non-blocking by severity vs `block_on`) |
+| `ruled_out` | The mitigation named at `file:line` in implemented code, on the path the threat uses. Docs, intent, or "looks validated" do not count | CLOSED (Evidence column) |
+| `unresolved` | What is missing (file not readable, flow not traceable, config not visible) and what would settle it | OPEN_THREATS if the gap is a declared mitigation you could not find; ESCALATE if you cannot verify at all |
+
+Before `confirmed`, look for counter-evidence: a guard upstream, a framework default, a validator at another boundary. Before `ruled_out`, check the mitigation covers ALL entry points of the threat. `unresolved` is a real result, never a downgrade to CLOSED.
+
+**Severity = proven weakness, not worst case.** Rate what the evidence demonstrates (reachability, preconditions, impact actually shown), not the worst imaginable outcome. If the proof only supports a lower rank than the register's, report the evidence-backed rank and say why; an unproven worst case stays `unresolved`. Missing or unparseable severity still fails closed to `critical` (see verify_and_return).
+</finding_closure>
+
 <execution_flow>
 
 <step name="load_context">
