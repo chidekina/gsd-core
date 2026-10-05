@@ -400,3 +400,60 @@ describe('[gsd-local] bare-node detector covers every command-position prefix', 
     test(`does not flag: ${line}`, () => assert.ok(!BARE_NODE_RE.test(line) || /^\s*#/.test(line), line));
   }
 });
+
+describe('[gsd-local] bareNodeLines ignores prose inside string literals', () => {
+  const { bareNodeLines } = require('./helpers/bare-node.cjs');
+  const hits = (line) => bareNodeLines(line).length;
+  // Prose that merely mentions node inside quotes is not a call.
+  const PROSE = [
+    'echo "if node is absent"', "echo 'then node foo.js'", 'echo "use: node -e x"',
+    'printf "%s\\n" "do node script.js"', 'echo "a" "while node is gone"',
+  ];
+  for (const line of PROSE) {
+    test(`prose not flagged: ${line}`, () => assert.strictEqual(hits(line), 0, line));
+  }
+  // Strings handed to a shell run as code, so they are NEVER prose (regression review of #8).
+  const SHELL_STRINGS = [
+    'bash -c "cd d && node x.js"', "sh -c 'echo a; node -e 1'", 'ssh h "cd /r && node s.js"',
+    'bash -c "if true; then node x; fi"', '"command": "bash -c \\"cd x && node a.js\\""',
+  ];
+  for (const line of SHELL_STRINGS) {
+    test(`shell string still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
+  }
+  // Prose piped into a shell executes, so a printer's string is not prose there.
+  const PIPED_TO_SHELL = ['echo "cd d && node x" | sh', 'echo "a; node x" | sh', "printf '%s' \"..; node x\" | bash",
+    'echo "a; node x" | sh -s', 'echo "a; node x" |& bash -s', 'echo "a; node x" | zsh',
+    // review gsd-core#8: wrappers, absolute paths and other shells still execute the string
+    'echo "a; node x" | sudo bash', 'echo "a; node x" | env bash', 'echo "a; node x" | /bin/sh',
+    'echo "a; node x" | dash', 'echo "a; node x" | ksh', 'echo "a; node x" | (sh)',
+    'echo "a; node x" | xargs sh -c', 'echo "a; node x" | busybox sh',
+    // re-review: wrapper arguments and paths
+    'echo "a; node x" | sudo -u root bash', 'echo "a; node x" | env FOO=1 bash', 'echo "a; node x" | /usr/bin/env bash',
+    'echo "a; node x" | ssh h bash', 'echo "a; node x" | su -c sh'];
+  test('pipe followed by a long run of spaces stays linear', () => {
+    const line = 'echo "a; node x" |' + ' '.repeat(50000) + 'x';
+    const t0 = Date.now(); hits(line); assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  });
+  for (const line of PIPED_TO_SHELL) {
+    test(`printer piped into a shell still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
+  }
+  // Named ceiling: a printed string that only runs LATER (written to a file, then executed)
+  // is not tracked — the filter is per line. Over-flags like `| tee bash.log` are accepted.
+  test('ceiling: echo "a; node x" > f.sh is not detected (printed, run later)', () => assert.strictEqual(hits('echo "a; node x" > f.sh'), 0));
+  // Named ceiling, NOT a regression: the old detector scored 0 here too.
+  test('ceiling: eval "$(echo "node x")" is not detected (old detector also 0)', () => assert.strictEqual(hits('eval "$(echo "node x")"'), 0));
+  test('multi-line string: closing quote is not read as an opening one', () => {
+    assert.strictEqual(bareNodeLines('foo "multi\nline"; node x.js').length, 1);
+  });
+  test('echo "use: node -e x" (vacuous control: the old detector also scored 0)', () => assert.strictEqual(hits('echo "use: node -e x"'), 0));
+  // Forged positives: a real call must still fire, including one living inside
+  // a quoted command substitution or after a quoted segment.
+  const REAL = [
+    'node -e "x"', 'echo "x"; node -e "x"', 'echo "x" && node script.js', 'x="$(node -p 1)"',
+    'echo "$(node -e x)"', 'echo "a `node -e x` b"', 'echo "it\'s" ; node -e "x"',
+    'if node -e "x"; then :; fi', 'a=$(node -p 1)',
+  ];
+  for (const line of REAL) {
+    test(`real call still flagged: ${line}`, () => assert.strictEqual(hits(line), 1, line));
+  }
+});
