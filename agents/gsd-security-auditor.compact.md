@@ -31,6 +31,17 @@ A phase has been submitted for security audit. Verify every declared threat miti
 Every threat resolves to CLOSED, OPEN-blocking (severity ≥ block_on), OPEN-non-blocking (severity < block_on), or documented accepted risk.
 </adversarial_stance>
 
+<finding_closure>
+Every threat and `unregistered_flag` ends in exactly ONE state; none dropped. Evidence rules per `<adversarial_stance>`.
+- `confirmed` — weakness shown by an existing test run, read-only command output, or traced source → control → sink (never write files) → OPEN
+- `ruled_out` — `mitigate`: mitigation at `file:line`; `accept`/`transfer`: SECURITY.md accepted-risk entry / transfer doc is the evidence → CLOSED
+- `unresolved` — state what is missing → OPEN (mitigation not found) or ESCALATE (cannot verify). Never a quiet CLOSED.
+Check counter-evidence before `confirmed`.
+**Severity:** rate the proven weakness, never above the register; never lower it without a mitigating factor cited at `file:line`. `unresolved` blocks at REGISTER severity. Missing severity → `critical`.
+**Precedence:** ESCALATE if any threat unverifiable; else OPEN_THREATS if any threat is OPEN (blocking or not — `threats_open` counts only blocking ones); else SECURED. `confirmed` and `unresolved` OPEN threats share the severity vs `block_on` split.
+`unregistered_flag` stays WARNING, non-blocking, never counted in `threats_open`.
+</finding_closure>
+
 <execution_flow>
 
 <step name="load_context">
@@ -82,6 +93,8 @@ Return SECURED / OPEN_THREATS / ESCALATE with `threats_open` set to the severity
 </execution_flow>
 
 <structured_returns>
+
+Each table row carries its closure state (`confirmed` / `ruled_out` / `unresolved`) in its Evidence cell, e.g. `ruled_out: src/auth.ts:42`.
 
 ## SECURED
 
@@ -143,6 +156,7 @@ Next: Implement mitigations or document as accepted risks, then re-run /gsd:secu
 **Closed:** 0/{total}
 
 ### Details
+Include any confirmed blocking threats in Details.
 | Threat ID | Reason Blocked | Suggested Action |
 |-----------|----------------|------------------|
 | {id} | {reason} | {action} |

@@ -37,6 +37,24 @@ Does NOT scan blindly for new vulnerabilities. Verifies each threat in `<threat_
 Every threat must resolve to CLOSED, OPEN-blocking (severity ≥ block_on), OPEN-non-blocking (severity below block_on), or documented accepted risk.
 </adversarial_stance>
 
+<finding_closure>
+Every threat and every `unregistered_flag` ends in exactly ONE closure state; none is dropped or merged away. Evidence rules are those of `<adversarial_stance>`.
+
+| State | Needs | Maps to |
+|-------|-------|---------|
+| `confirmed` | Weakness shown by an existing test run, read-only command output, or a traced source → control → sink path (never write files) | OPEN |
+| `ruled_out` | `mitigate` threats: the mitigation at `file:line` on the path the threat uses. `accept`/`transfer`: the SECURITY.md accepted-risk entry or the transfer document is the closing evidence | CLOSED |
+| `unresolved` | What is missing and what would settle it | OPEN (mitigation not found) or ESCALATE (cannot verify) |
+
+Before `confirmed`, look for counter-evidence (upstream guard, framework default, validator at another boundary). `unresolved` is a real result, never a quiet CLOSED.
+
+**Severity:** rate the proven weakness; never inflate above the register. Never lower a register severity unless a mitigating factor is cited at `file:line`. `unresolved` threats block at the REGISTER severity (an unresolved would-be high/critical blocks). Missing or unparseable severity still fails closed to `critical`.
+
+**Verdict precedence:** ESCALATE if any threat is unverifiable; else OPEN_THREATS if any threat is OPEN (blocking or not — `threats_open` counts only blocking ones); else SECURED. OPEN threats from `confirmed` and `unresolved` alike follow the same severity vs `block_on` split.
+
+**`unregistered_flag`** stays WARNING and non-blocking whatever its closure state; it never counts toward `threats_open`.
+</finding_closure>
+
 <execution_flow>
 
 <step name="load_context">
@@ -96,6 +114,8 @@ Return the structured result (SECURED / OPEN_THREATS / ESCALATE) with `threats_o
 </execution_flow>
 
 <structured_returns>
+
+Each table row carries its closure state (`confirmed` / `ruled_out` / `unresolved`) in its Evidence cell, e.g. `ruled_out: src/auth.ts:42`.
 
 ## SECURED
 
@@ -157,6 +177,7 @@ Next: Implement mitigations or document as accepted risks, then re-run /gsd:secu
 **Closed:** 0/{total}
 
 ### Details
+Include any confirmed blocking threats in Details.
 | Threat ID | Reason Blocked | Suggested Action |
 |-----------|----------------|------------------|
 | {id} | {reason} | {action} |
