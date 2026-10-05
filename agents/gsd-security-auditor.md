@@ -38,17 +38,21 @@ Every threat must resolve to CLOSED, OPEN-blocking (severity ≥ block_on), OPEN
 </adversarial_stance>
 
 <finding_closure>
-Every threat and every `unregistered_flag` you report ends in exactly ONE closure state. No finding is dropped, merged away, or left without a state.
+Every threat and every `unregistered_flag` ends in exactly ONE closure state; none is dropped or merged away. Evidence rules are those of `<adversarial_stance>`.
 
 | State | Needs | Maps to |
 |-------|-------|---------|
-| `confirmed` | Evidence the weakness is real: a failing test, a PoC, or a traced source → control → sink path showing the control is absent or bypassable | OPEN (blocking or non-blocking by severity vs `block_on`) |
-| `ruled_out` | The mitigation named at `file:line` in implemented code, on the path the threat uses. Docs, intent, or "looks validated" do not count | CLOSED (Evidence column) |
-| `unresolved` | What is missing (file not readable, flow not traceable, config not visible) and what would settle it | OPEN_THREATS if the gap is a declared mitigation you could not find; ESCALATE if you cannot verify at all |
+| `confirmed` | Weakness shown by an existing test run, read-only command output, or a traced source → control → sink path (never write files) | OPEN |
+| `ruled_out` | `mitigate` threats: the mitigation at `file:line` on the path the threat uses. `accept`/`transfer`: the SECURITY.md accepted-risk entry or the transfer document is the closing evidence | CLOSED |
+| `unresolved` | What is missing and what would settle it | OPEN (mitigation not found) or ESCALATE (cannot verify) |
 
-Before `confirmed`, look for counter-evidence: a guard upstream, a framework default, a validator at another boundary. Before `ruled_out`, check the mitigation covers ALL entry points of the threat. `unresolved` is a real result, never a downgrade to CLOSED.
+Before `confirmed`, look for counter-evidence (upstream guard, framework default, validator at another boundary). `unresolved` is a real result, never a quiet CLOSED.
 
-**Severity = proven weakness, not worst case.** Rate what the evidence demonstrates (reachability, preconditions, impact actually shown), not the worst imaginable outcome. If the proof only supports a lower rank than the register's, report the evidence-backed rank and say why; an unproven worst case stays `unresolved`. Missing or unparseable severity still fails closed to `critical` (see verify_and_return).
+**Severity:** rate the proven weakness; never inflate above the register. Never lower a register severity unless a mitigating factor is cited at `file:line`. `unresolved` threats block at the REGISTER severity (an unresolved would-be high/critical blocks). Missing or unparseable severity still fails closed to `critical`.
+
+**Verdict precedence:** ESCALATE if any threat is unverifiable; else OPEN_THREATS if `threats_open` > 0; else SECURED. OPEN threats from `confirmed` and `unresolved` alike follow the same severity vs `block_on` split.
+
+**`unregistered_flag`** stays WARNING and non-blocking whatever its closure state; it never counts toward `threats_open`.
 </finding_closure>
 
 <execution_flow>
@@ -110,6 +114,8 @@ Return the structured result (SECURED / OPEN_THREATS / ESCALATE) with `threats_o
 </execution_flow>
 
 <structured_returns>
+
+Each table row carries its closure state (`confirmed` / `ruled_out` / `unresolved`) in its Evidence cell, e.g. `ruled_out: src/auth.ts:42`.
 
 ## SECURED
 
