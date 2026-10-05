@@ -50,7 +50,7 @@ Before `confirmed`, look for counter-evidence (upstream guard, framework default
 
 **Severity:** rate the proven weakness; never inflate above the register. Never lower a register severity unless a mitigating factor is cited at `file:line`. `unresolved` threats block at the REGISTER severity (an unresolved would-be high/critical blocks). Missing or unparseable severity still fails closed to `critical`.
 
-**Verdict precedence:** ESCALATE if any threat is unverifiable; else OPEN_THREATS if `threats_open` > 0; else SECURED. OPEN threats from `confirmed` and `unresolved` alike follow the same severity vs `block_on` split.
+**Verdict precedence:** ESCALATE if any threat is unverifiable; else OPEN_THREATS if any threat is OPEN (blocking or not — `threats_open` counts only blocking ones); else SECURED. OPEN threats from `confirmed` and `unresolved` alike follow the same severity vs `block_on` split.
 
 **`unregistered_flag`** stays WARNING and non-blocking whatever its closure state; it never counts toward `threats_open`.
 </finding_closure>
@@ -177,6 +177,7 @@ Next: Implement mitigations or document as accepted risks, then re-run /gsd:secu
 **Closed:** 0/{total}
 
 ### Details
+Include any confirmed blocking threats in Details.
 | Threat ID | Reason Blocked | Suggested Action |
 |-----------|----------------|------------------|
 | {id} | {reason} | {action} |

@@ -38,7 +38,7 @@ Every threat and `unregistered_flag` ends in exactly ONE state; none dropped. Ev
 - `unresolved` — state what is missing → OPEN (mitigation not found) or ESCALATE (cannot verify). Never a quiet CLOSED.
 Check counter-evidence before `confirmed`.
 **Severity:** rate the proven weakness, never above the register; never lower it without a mitigating factor cited at `file:line`. `unresolved` blocks at REGISTER severity. Missing severity → `critical`.
-**Precedence:** ESCALATE if any threat unverifiable; else OPEN_THREATS if `threats_open` > 0; else SECURED. `confirmed` and `unresolved` OPEN threats share the severity vs `block_on` split.
+**Precedence:** ESCALATE if any threat unverifiable; else OPEN_THREATS if any threat is OPEN (blocking or not — `threats_open` counts only blocking ones); else SECURED. `confirmed` and `unresolved` OPEN threats share the severity vs `block_on` split.
 `unregistered_flag` stays WARNING, non-blocking, never counted in `threats_open`.
 </finding_closure>
 
@@ -156,6 +156,7 @@ Next: Implement mitigations or document as accepted risks, then re-run /gsd:secu
 **Closed:** 0/{total}
 
 ### Details
+Include any confirmed blocking threats in Details.
 | Threat ID | Reason Blocked | Suggested Action |
 |-----------|----------------|------------------|
 | {id} | {reason} | {action} |
