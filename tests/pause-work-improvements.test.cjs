@@ -396,6 +396,8 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
       if (!VERBS.has(verb)) problems.push(`verb not allowed: ${verb}`);
       if (/--debug/.test(c)) problems.push(`--debug: ${c}`);
       if (!/--region /.test(c)) problems.push(`no --region: ${c}`);
+      const qs = [...c.matchAll(/--query\b/g)].length;
+      if (qs > 1) problems.push(`${qs} --query flags (only the first would be checked): ${c}`);
       const q = c.match(/--query '([^']+)'/);
       if (!q) { problems.push(`no --query: ${c}`); continue; }
       const why = queryProblem(q[1]);
@@ -426,6 +428,7 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
       "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].currentDeployment.*'`",
       "`aws lightsail get-container-services --region us-east-1 --query '@'`",
       "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].{img:currentDeployment}'`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].{s:state}' --query 'containerServices[0]'`",
       "`aws lightsail get-relational-database-master-user-password --region us-east-1 --query 'masterUserPassword'`",
       "```\naws lightsail get-container-services --region us-east-1\n```",
     ];
@@ -456,5 +459,7 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
     assert.match(b, /but aws CLI not found — snapshot skipped/);
     assert.match(b, /AWS_REGION/);
     assert.match(b, /none detected by keyword search/);
+    assert.match(b, /if EVERY grepped name was not found, fall back to the account listing/);
+    assert.match(b, /databases \(account, region <region>\)/);
   });
 });
