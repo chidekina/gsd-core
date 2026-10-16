@@ -364,22 +364,42 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
     return m[1];
   };
 
-  // Every `aws lightsail ...` command inside an inline code span, checked one by one (a regex over the
-  // whole line passed whenever ANY --query appeared later on it — review of PR #10).
-  const ALLOWED_KEYS = /^(state|version|image|name|containerServiceName|backupRetentionEnabled|currentDeployment|containers|containerServices|relationalDatabases|estado|ver|deploy|img|n|backup)$/;
-  const LEAKY_VERBS = /get-container-service-deployments|get-container-log|get-container-api-metadata|--debug/;
+  // Every `aws lightsail ...` command, checked one by one and STRUCTURALLY (review of PR #10, rounds 1-2):
+  // a lexical key whitelist let `containerServices[0]`, `...currentDeployment`, `.*` and `@` through, and
+  // each of those prints the container environment. A query is accepted only as one of the shapes below,
+  // with every selected value a scalar leaf path from the allow-list. The verb is allow-listed too.
+  const VERBS = new Set(['get-container-services', 'get-relational-databases']);
+  const LEAVES = {
+    'containerServices[0]': new Set(['state', 'currentDeployment.version', 'currentDeployment.state', 'currentDeployment.containers.*.image|[0]']),
+    'relationalDatabases[]': new Set(['name', 'state', 'backupRetentionEnabled']),
+  };
+  const LIST_QUERY = 'containerServices[].containerServiceName';
+  function queryProblem(q) {
+    if (q === LIST_QUERY) return null;
+    const m = q.match(/^(containerServices\[0\]|relationalDatabases\[\])\.\{(.+)\}$/);
+    if (!m) return `shape not allowed: ${q}`;
+    for (const pair of m[2].split(',')) {
+      const kv = pair.match(/^([A-Za-z]+):(.+)$/);
+      if (!kv) return `bad pair ${pair}`;
+      if (!LEAVES[m[1]].has(kv[2])) return `value not a leaf: ${kv[2]}`;
+    }
+    return null;
+  }
   function awsCallProblems(text) {
     const calls = [...text.matchAll(/`(aws lightsail [^`]+)`/g)].map(m => m[1]);
     const problems = [];
+    // a call outside an inline span (fenced block, double space) would escape the per-call check
+    const mentions = (text.match(/aws\s+lightsail\s/g) || []).length;
+    if (mentions !== calls.length) problems.push(`${mentions} aws lightsail mentions, ${calls.length} checked spans`);
     for (const c of calls) {
-      if (LEAKY_VERBS.test(c)) problems.push(`leaky verb: ${c}`);
+      const verb = c.split(/\s+/)[2];
+      if (!VERBS.has(verb)) problems.push(`verb not allowed: ${verb}`);
+      if (/--debug/.test(c)) problems.push(`--debug: ${c}`);
       if (!/--region /.test(c)) problems.push(`no --region: ${c}`);
       const q = c.match(/--query '([^']+)'/);
       if (!q) { problems.push(`no --query: ${c}`); continue; }
-      if (/environment/i.test(q[1])) problems.push(`selects environment: ${c}`);
-      for (const k of q[1].match(/[A-Za-z]+/g) || []) if (!ALLOWED_KEYS.test(k)) problems.push(`key ${k}: ${c}`);
-      // containers may only be read through its image projection, never whole.
-      if (/containers(?!\.\*\.image)/.test(q[1])) problems.push(`containers selected whole: ${c}`);
+      const why = queryProblem(q[1]);
+      if (why) problems.push(why);
     }
     return { calls, problems };
   }
@@ -401,6 +421,13 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
       "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].currentDeployment.containers.*.environment'`",
       "`aws lightsail get-container-log --region us-east-1 --query 'logEvents'`",
       "`aws lightsail get-container-services --query 'containerServices[].containerServiceName'`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0]'`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].currentDeployment'`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].currentDeployment.*'`",
+      "`aws lightsail get-container-services --region us-east-1 --query '@'`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].{img:currentDeployment}'`",
+      "`aws lightsail get-relational-database-master-user-password --region us-east-1 --query 'masterUserPassword'`",
+      "```\naws lightsail get-container-services --region us-east-1\n```",
     ];
     for (const f of forged) assert.ok(awsCallProblems(f).problems.length > 0, `should reject: ${f}`);
     const ok = "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].{estado:state,img:currentDeployment.containers.*.image|[0]}' --output json`";
@@ -417,13 +444,14 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
   test('the managed check runs even when the SSH branch skipped (Check B can match "no VPS")', () => {
     const b = block();
     assert.match(b, /independently of the VPS result/i);
+    assert.equal((b.match(/snapshot skipped[^\n]*` and go to the managed-platform check below\./g) || []).length, 2, 'both SSH skips hand over to the managed check');
     assert.doesNotMatch(b, /` and skip\./, 'SSH skips must hand over to the managed check');
     assert.doesNotMatch(b, /skip the entire block silently/i);
   });
 
   test('detection, missing CLI, region and the empty case are each reported', () => {
     const b = block();
-    for (const root of ['docs', 'README.md', 'scripts', '.planning/PROJECT.md']) assert.ok(b.includes(`$PROJECT_ROOT/${root}`), `detection scans ${root}`);
+    for (const root of ['docs', 'CLAUDE.md', 'AGENTS.md', 'README.md', 'scripts', 'infra', '.github', '.planning/PROJECT.md']) assert.ok(b.includes(`$PROJECT_ROOT/${root}`), `detection scans ${root}`);
     assert.match(b, /command -v aws/);
     assert.match(b, /but aws CLI not found — snapshot skipped/);
     assert.match(b, /AWS_REGION/);
