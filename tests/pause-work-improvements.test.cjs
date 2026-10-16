@@ -354,3 +354,35 @@ describe('bug #3689 — workflow text invariant', () => {
 });
   });
 }
+
+describe('pause-work infra snapshot beyond SSH VPS', () => {
+  const p = path.join(__dirname, '..', 'gsd-core', 'workflows', 'pause-work.md');
+  const block = () => {
+    const t = fs.readFileSync(p, 'utf-8');
+    const m = t.match(/<!-- vps-sync-start -->([\s\S]*?)<!-- vps-sync-end -->/);
+    assert.ok(m, 'vps-sync block must exist');
+    return m[1];
+  };
+
+  // match-co 2026-10-16: prod on AWS Lightsail Container Service (no SSH) was "skipped silently"
+  // as if the project had no infrastructure. The block must recognise a managed container
+  // platform, and it must never dump the service environment (secrets).
+  test('detects AWS Lightsail container services instead of skipping as non-VPS', () => {
+    const b = block();
+    assert.match(b, /lightsail/i, 'block should handle AWS Lightsail');
+    assert.match(b, /get-container-services[^\n]*--query/, 'Lightsail read must carry --query');
+  });
+
+  test('never reads the Lightsail environment (secrets) in the snapshot', () => {
+    const b = block();
+    assert.doesNotMatch(b, /get-container-services(?![^\n]*--query)/, 'every get-container-services call needs --query');
+    assert.doesNotMatch(b, /\.environment/, 'snapshot must not select the container environment');
+  });
+
+  test('a platform without SSH is reported, not skipped silently as non-VPS', () => {
+    const b = block();
+    // "no ssh details" already exists in the SSH branch, so the assertion names the new branch's own phrase.
+    assert.match(b, /managed container platform/i, 'block should name the no-SSH managed case explicitly');
+    assert.doesNotMatch(b, /skip the entire block silently \(non-VPS project\)/, 'non-VPS must not mean silent skip');
+  });
+});
