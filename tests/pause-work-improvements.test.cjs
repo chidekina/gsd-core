@@ -364,25 +364,69 @@ describe('pause-work infra snapshot beyond SSH VPS', () => {
     return m[1];
   };
 
-  // match-co 2026-10-16: prod on AWS Lightsail Container Service (no SSH) was "skipped silently"
-  // as if the project had no infrastructure. The block must recognise a managed container
-  // platform, and it must never dump the service environment (secrets).
-  test('detects AWS Lightsail container services instead of skipping as non-VPS', () => {
-    const b = block();
-    assert.match(b, /lightsail/i, 'block should handle AWS Lightsail');
-    assert.match(b, /get-container-services[^\n]*--query/, 'Lightsail read must carry --query');
+  // Every `aws lightsail ...` command inside an inline code span, checked one by one (a regex over the
+  // whole line passed whenever ANY --query appeared later on it — review of PR #10).
+  const ALLOWED_KEYS = /^(state|version|image|name|containerServiceName|backupRetentionEnabled|currentDeployment|containers|containerServices|relationalDatabases|estado|ver|deploy|img|n|backup)$/;
+  const LEAKY_VERBS = /get-container-service-deployments|get-container-log|get-container-api-metadata|--debug/;
+  function awsCallProblems(text) {
+    const calls = [...text.matchAll(/`(aws lightsail [^`]+)`/g)].map(m => m[1]);
+    const problems = [];
+    for (const c of calls) {
+      if (LEAKY_VERBS.test(c)) problems.push(`leaky verb: ${c}`);
+      if (!/--region /.test(c)) problems.push(`no --region: ${c}`);
+      const q = c.match(/--query '([^']+)'/);
+      if (!q) { problems.push(`no --query: ${c}`); continue; }
+      if (/environment/i.test(q[1])) problems.push(`selects environment: ${c}`);
+      for (const k of q[1].match(/[A-Za-z]+/g) || []) if (!ALLOWED_KEYS.test(k)) problems.push(`key ${k}: ${c}`);
+      // containers may only be read through its image projection, never whole.
+      if (/containers(?!\.\*\.image)/.test(q[1])) problems.push(`containers selected whole: ${c}`);
+    }
+    return { calls, problems };
+  }
+
+  // match-co 2026-10-16: prod on AWS Lightsail Container Service (no SSH) was "skipped silently" as if
+  // the project had no infrastructure.
+  test('handles AWS Lightsail with every call scoped, regioned and query-limited', () => {
+    const { calls, problems } = awsCallProblems(block());
+    assert.ok(calls.filter(c => /get-container-services/.test(c)).length >= 2, `expected list + per-service calls, got ${calls.length}`);
+    assert.ok(calls.some(c => /get-relational-databases/.test(c)), 'databases are part of the snapshot');
+    assert.deepEqual(problems, []);
   });
 
-  test('never reads the Lightsail environment (secrets) in the snapshot', () => {
-    const b = block();
-    assert.doesNotMatch(b, /get-container-services(?![^\n]*--query)/, 'every get-container-services call needs --query');
-    assert.doesNotMatch(b, /\.environment/, 'snapshot must not select the container environment');
+  // CONTROL: the checker must fail the shapes that leak, or a green above measures nothing.
+  test('the call checker rejects each leaking shape', () => {
+    const forged = [
+      "`aws lightsail get-container-services --region us-east-1 --service-name x`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].currentDeployment.containers'`",
+      "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].currentDeployment.containers.*.environment'`",
+      "`aws lightsail get-container-log --region us-east-1 --query 'logEvents'`",
+      "`aws lightsail get-container-services --query 'containerServices[].containerServiceName'`",
+    ];
+    for (const f of forged) assert.ok(awsCallProblems(f).problems.length > 0, `should reject: ${f}`);
+    const ok = "`aws lightsail get-container-services --region us-east-1 --query 'containerServices[0].{estado:state,img:currentDeployment.containers.*.image|[0]}' --output json`";
+    assert.deepEqual(awsCallProblems(ok).problems, []);
   });
 
-  test('a platform without SSH is reported, not skipped silently as non-VPS', () => {
+  test('the block forbids the env-leaking neighbours and the retry without --query', () => {
     const b = block();
-    // "no ssh details" already exists in the SSH branch, so the assertion names the new branch's own phrase.
-    assert.match(b, /managed container platform/i, 'block should name the no-SSH managed case explicitly');
-    assert.doesNotMatch(b, /skip the entire block silently \(non-VPS project\)/, 'non-VPS must not mean silent skip');
+    assert.match(b, /never call `get-container-service-deployments`/i);
+    assert.match(b, /never add `--debug`/i);
+    assert.match(b, /do not rerun it without `--query`/i);
+  });
+
+  test('the managed check runs even when the SSH branch skipped (Check B can match "no VPS")', () => {
+    const b = block();
+    assert.match(b, /independently of the VPS result/i);
+    assert.doesNotMatch(b, /` and skip\./, 'SSH skips must hand over to the managed check');
+    assert.doesNotMatch(b, /skip the entire block silently/i);
+  });
+
+  test('detection, missing CLI, region and the empty case are each reported', () => {
+    const b = block();
+    for (const root of ['docs', 'README.md', 'scripts', '.planning/PROJECT.md']) assert.ok(b.includes(`$PROJECT_ROOT/${root}`), `detection scans ${root}`);
+    assert.match(b, /command -v aws/);
+    assert.match(b, /but aws CLI not found — snapshot skipped/);
+    assert.match(b, /AWS_REGION/);
+    assert.match(b, /none detected by keyword search/);
   });
 });

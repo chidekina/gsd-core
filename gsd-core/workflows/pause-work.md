@@ -426,19 +426,12 @@ Detect VPS config using two checks:
 - Check A: `python3 -c "import json,pathlib,sys; d=json.loads(pathlib.Path(sys.argv[1]).read_text()); print('yes' if 'vps' in d else 'no')" "$PROJECT_ROOT/.planning/config.json"` — prints `yes` if top-level `vps` key exists.
 - Check B: `grep -rl "VPS\|vps:" .planning/phases/ 2>/dev/null` — returns matching files if VPS appears in any CONTEXT.md.
 
-If neither check finds VPS config, check for a **managed container platform (no SSH)** before giving up — production on one is still infrastructure, and skipping it reads as "no infra":
+If neither check finds VPS config, print `· infra snapshot: no SSH VPS configured` and continue to the managed-platform check at the end of this block (do not stop here).
 
-- **AWS Lightsail Container Service** — detected when `grep -rliI "lightsail" "$PROJECT_ROOT/docs" "$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md" "$PROJECT_ROOT/scripts" 2>/dev/null | head -1` returns a file AND `command -v aws` succeeds. List the services with `aws lightsail get-container-services --query 'containerServices[].containerServiceName' --output text`, then for each one read ONLY state, version and image:
-  `aws lightsail get-container-services --service-name <s> --query 'containerServices[0].{estado:state,ver:currentDeployment.version,deploy:currentDeployment.state,img:currentDeployment.containers.*.image|[0]}' --output json`
-  🔴 Every `get-container-services` call carries `--query`. Without it the CLI prints each container's environment block — database URL, API keys, JWT secret — into the transcript.
-  Also read `aws lightsail get-relational-databases --query 'relationalDatabases[].{n:name,estado:state,backup:backupRetentionEnabled}' --output json` (empty list is fine).
-  Append to `~/.claude/projects/-home-hidekina-projetos/memory/vps-apps-status.md` a section `## Lightsail Snapshot [TIMESTAMP] — PROJECT_NAME` with one line per service (`name: state · deploy vN state · image`) and per database, and emit `✓ Lightsail snapshot saved: vps-apps-status.md`. If an `aws` call fails (no credentials, no network), print `⚠️ Lightsail snapshot skipped — <first line of the error>` and continue.
 
-Only when neither a VPS nor a managed container platform is found, print `· infra snapshot: no VPS or managed platform detected` and skip the rest of this block (non-blocking, but never silent).
+If VPS config is detected, extract SSH connection details from `.planning/config.json` `vps` object: `host`, `port` (default `22` if absent), `user` (default `root` if absent). If config.json has no `vps` key but the grep check matched, print `⚠️ VPS config detected in CONTEXT.md but no ssh details in config.json — snapshot skipped` and go to the managed-platform check below.
 
-If VPS config is detected, extract SSH connection details from `.planning/config.json` `vps` object: `host`, `port` (default `22` if absent), `user` (default `root` if absent). If config.json has no `vps` key but the grep check matched, print `⚠️ VPS config detected in CONTEXT.md but no ssh details in config.json — snapshot skipped` and skip.
-
-Run SSH snapshot with timeout: `ssh -o ConnectTimeout=5 -o BatchMode=yes -p PORT USER@HOST "docker ps --format '{{.Names}}\t{{.Status}}'" 2>&1`. If the command exits non-zero or the output contains `Connection refused`, `Connection timed out`, or `Permission denied`, print `⚠️ VPS snapshot skipped — SSH unreachable (HOST:PORT)` and skip.
+Run SSH snapshot with timeout: `ssh -o ConnectTimeout=5 -o BatchMode=yes -p PORT USER@HOST "docker ps --format '{{.Names}}\t{{.Status}}'" 2>&1`. If the command exits non-zero or the output contains `Connection refused`, `Connection timed out`, or `Permission denied`, print `⚠️ VPS snapshot skipped — SSH unreachable (HOST:PORT)` and go to the managed-platform check below.
 
 On success, get timestamp via `python3 -c "from datetime import datetime; print(datetime.now().strftime('%Y-%m-%d %H:%M'))"` and append the following to `~/.claude/projects/-home-hidekina-projetos/memory/vps-apps-status.md`:
 
@@ -453,6 +446,20 @@ Where PROJECT_NAME = `project.name` from config.json (or empty if unavailable).
 Emit `✓ VPS snapshot saved: vps-apps-status.md` on success.
 
 Any exception must print `⚠️ VPS sync failed: <brief reason>` and continue — this block is non-blocking.
+
+**Managed container platform (no SSH)** — run this check **independently of the VPS result**: also when the SSH branch above ended in a skip (a CONTEXT.md that says "no VPS, prod on Lightsail" matches Check B and must not hide the platform).
+
+- **AWS Lightsail Container Service.**
+  1. Detect: `grep -rliI "lightsail" "$PROJECT_ROOT/docs" "$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md" "$PROJECT_ROOT/README.md" "$PROJECT_ROOT/scripts" "$PROJECT_ROOT/infra" "$PROJECT_ROOT/.github" "$PROJECT_ROOT/.planning/PROJECT.md" 2>/dev/null | head -1`. No hit → not Lightsail. Hit but `command -v aws` fails → print `⚠️ Lightsail referenced in <file> but aws CLI not found — snapshot skipped` and stop this platform.
+  2. Region: `AWS_REGION`, else the first region literal in the repo (`grep -rhoE "\b(us|eu|ap|ca|sa)-(east|west|north|south|central|northeast|southeast)-[0-9]\b" <same roots> 2>/dev/null | head -1`), else `aws configure get region`. None → print `⚠️ Lightsail snapshot skipped — no region (set AWS_REGION)` and stop. Pass `--region <region>` on **every** call below.
+  3. Services of THIS project: the names the repo itself uses (`grep -rhoE "service-name[ =]+[A-Za-z0-9-]+" <same roots> 2>/dev/null | sort -u`, keep the last word). None found → list the account's services with `aws lightsail get-container-services --region <region> --query 'containerServices[].containerServiceName' --output json` and label the section with the account and region instead of the project name, because they may belong to other projects.
+  4. For each service, read ONLY state, version and image:
+     `aws lightsail get-container-services --region <region> --service-name <s> --query 'containerServices[0].{estado:state,ver:currentDeployment.version,deploy:currentDeployment.state,img:currentDeployment.containers.*.image|[0]}' --output json`
+     and the databases: `aws lightsail get-relational-databases --region <region> --query 'relationalDatabases[].{n:name,estado:state,backup:backupRetentionEnabled}' --output json` (empty list is fine).
+  5. 🔴 **Secrets.** Every `get-container-services` call carries `--query` with only the keys above. Without it the CLI prints each container's environment block — database URL, API keys, JWT secret — into the transcript. Never call `get-container-service-deployments`, `get-container-log` or `get-container-api-metadata` here, never add `--debug`, and **if a `--query` call fails, do not rerun it without `--query`**: print `⚠️ Lightsail snapshot skipped — <first line of the error>` and stop this platform.
+  6. Write once, after all calls: timestamp from `python3 -c "from datetime import datetime; print(datetime.now().strftime('%Y-%m-%d %H:%M'))"`, then append to `~/.claude/projects/-home-hidekina-projetos/memory/vps-apps-status.md` a blank line and `## Lightsail Snapshot [TIMESTAMP] — PROJECT_NAME (region <region>)` (or `— account <region>` per step 3), one line per service (`name: state · deploy vN state · image`) and per database. Emit `✓ Lightsail snapshot saved: vps-apps-status.md (region <region>)`.
+
+When neither an SSH VPS nor a managed platform was found, print `· infra snapshot: none detected by keyword search (checked SSH VPS config and Lightsail mentions)` — it reports what was searched, not that the project has no infrastructure. This block is non-blocking, but never silent.
 <!-- vps-sync-end -->
 
 ✓ Handoff created:
