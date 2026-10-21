@@ -111,7 +111,8 @@ test('Kimi agent YAML and prompt omit Claude-only frontmatter', () => {
 // Frontmatter edge cases for the pass-through strip (hermes routes through it).
 const EDGE_SOURCES = {
   'a --- inside a value before the key': '---\nname: gsd-doc-classifier\ndescription: before --- after\nomitClaudeMd: true\n---\n\nClassify the document.\n',
-  'a BOM before the opening fence': '﻿---\nname: gsd-doc-classifier\nomitClaudeMd: true\n---\n\nClassify the document.\n',
+  'a BOM before the opening fence': '\uFEFF---\nname: gsd-doc-classifier\nomitClaudeMd: true\n---\n\nClassify the document.\n',
+  'trailing spaces on the closing fence': '---\nname: gsd-doc-classifier\nomitClaudeMd: true\n--- \n\nClassify the document.\n',
   'CRLF line endings': '---\r\nname: gsd-doc-classifier\r\nomitClaudeMd: true\r\n---\r\n\r\nClassify the document.\r\n',
 };
 for (const [label, source] of Object.entries(EDGE_SOURCES)) {

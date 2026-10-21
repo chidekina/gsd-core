@@ -4020,7 +4020,7 @@ const READONLY_AGENT_DISALLOWED_TOOLS: Record<string, string> = {
 // Claude-only keys. Limit removal to frontmatter so prompt examples survive.
 // The closing fence must start its own line: a `---` inside a value is not a fence.
 function stripClaudeOnlyAgentFrontmatter(content: string): string {
-  const match = /^﻿?---\r?\n[\s\S]*?\r?\n(?=---(?:\r?\n|$))/.exec(content);
+  const match = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?=---[ \t]*(?:\r?\n|$))/.exec(content);
   if (!match) return content;
   const head = match[0];
   return head.replace(/^omitClaudeMd:[^\r\n]*\r?\n/gm, '') + content.slice(head.length);
