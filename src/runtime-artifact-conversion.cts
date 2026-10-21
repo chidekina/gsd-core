@@ -2125,8 +2125,8 @@ function convertClaudeToOpencodeFrontmatter(content, { isAgent = false, modelOve
       continue;
     }
 
-    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:
-    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools):/.test(trimmed)) {
+    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:, omitClaudeMd:
+    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools|omitClaudeMd):/.test(trimmed)) {
       inSkippedArray = true;
       continue;
     }
@@ -2329,8 +2329,8 @@ function convertClaudeToKiloFrontmatter(content, { isAgent = false, modelOverrid
       continue;
     }
 
-    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:
-    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools):/.test(trimmed)) {
+    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:, omitClaudeMd:
+    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools|omitClaudeMd):/.test(trimmed)) {
       inSkippedArray = true;
       continue;
     }
@@ -2766,6 +2766,7 @@ function zcodeKeepsGrant(rawTool: string): boolean {
 }
 
 function convertClaudeAgentToZcodeAgent(content) {
+  content = stripClaudeOnlyAgentFrontmatter(content);
   // A double-quoted YAML scalar may encode the leading "m" in mcp__ as an
   // escape, so only skip the shared scalar-decoder scan when neither form is
   // present. The unchanged scan below still preserves byte-identical content.
@@ -2902,7 +2903,7 @@ function applyAgentBrandingRewrites(content, runtime) {
  * never hardcoded here.
  */
 function convertClaudeAgentToHermesAgent(content) {
-  return applyAgentBrandingRewrites(content, 'hermes');
+  return applyAgentBrandingRewrites(stripClaudeOnlyAgentFrontmatter(content), 'hermes');
 }
 
 /**
@@ -4015,6 +4016,16 @@ const READONLY_AGENT_DISALLOWED_TOOLS: Record<string, string> = {
   'gsd-ui-auditor': 'Edit, MultiEdit',
 };
 
+// Pass-through agent formats (including converter:null) still need to drop
+// Claude-only keys. Limit removal to frontmatter so prompt examples survive.
+// The closing fence must start its own line: a `---` inside a value is not a fence.
+function stripClaudeOnlyAgentFrontmatter(content: string): string {
+  const match = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?=---[ \t]*(?:\r?\n|$))/.exec(content);
+  if (!match) return content;
+  const head = match[0];
+  return head.replace(/^omitClaudeMd:[^\r\n]*\r?\n/gm, '') + content.slice(head.length);
+}
+
 /**
  * Post-converter frontmatter-extensions step (#2875 Part 2 / ADR-1235 §1
  * follow-up). Driven by the runtime descriptor's
@@ -4042,6 +4053,7 @@ function applyAgentFrontmatterExtensions(
   content: string,
   { runtime, agentName, targetDir }: { runtime: string; agentName: string; targetDir?: string | null },
 ): string {
+  if (runtime !== 'claude') content = stripClaudeOnlyAgentFrontmatter(content);
   const extensions = (_hostBehaviors(runtime).agentFrontmatterExtensions as string[] | undefined) || [];
   if (!extensions.includes('effort')) return content;
 

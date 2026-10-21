@@ -7341,8 +7341,8 @@ function convertClaudeToOpencodeFrontmatter(content, { isAgent = false, modelOve
       continue;
     }
 
-    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:
-    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools):/.test(trimmed)) {
+    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:, omitClaudeMd:
+    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools|omitClaudeMd):/.test(trimmed)) {
       inSkippedArray = true;
       continue;
     }
@@ -7530,8 +7530,8 @@ function convertClaudeToKiloFrontmatter(content, { isAgent = false, modelOverrid
       continue;
     }
 
-    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:
-    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools):/.test(trimmed)) {
+    // For agents: strip skills:, color:, memory:, maxTurns:, permissionMode:, disallowedTools:, omitClaudeMd:
+    if (isAgent && /^(skills|color|memory|maxTurns|permissionMode|disallowedTools|omitClaudeMd):/.test(trimmed)) {
       inSkippedArray = true;
       continue;
     }
