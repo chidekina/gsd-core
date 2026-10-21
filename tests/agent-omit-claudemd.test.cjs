@@ -105,7 +105,23 @@ test('Kimi agent YAML and prompt omit Claude-only frontmatter', () => {
   });
   assert.doesNotMatch(result.root.yaml, /omitClaudeMd/);
   assert.doesNotMatch(result.root.prompt, /omitClaudeMd/);
+  assert.match(result.root.prompt, /Classify the document\./, 'prompt must retain the body');
 });
+
+// Frontmatter edge cases for the pass-through strip (hermes routes through it).
+const EDGE_SOURCES = {
+  'a --- inside a value before the key': '---\nname: gsd-doc-classifier\ndescription: before --- after\nomitClaudeMd: true\n---\n\nClassify the document.\n',
+  'a BOM before the opening fence': '﻿---\nname: gsd-doc-classifier\nomitClaudeMd: true\n---\n\nClassify the document.\n',
+  'CRLF line endings': '---\r\nname: gsd-doc-classifier\r\nomitClaudeMd: true\r\n---\r\n\r\nClassify the document.\r\n',
+};
+for (const [label, source] of Object.entries(EDGE_SOURCES)) {
+  test(`hermes strip handles ${label}`, () => {
+    const output = conversion.convertClaudeAgentToHermesAgent(source);
+    assert.doesNotMatch(output, /omitClaudeMd/);
+    assert.match(output, /name: gsd-doc-classifier/);
+    assert.match(output, /Classify the document\./);
+  });
+}
 
 for (const runtime of ['opencode', 'kilo', 'kimi-code', 'hermes']) {
   test(`${runtime} install strips omitClaudeMd from full and compact agents`, t => {

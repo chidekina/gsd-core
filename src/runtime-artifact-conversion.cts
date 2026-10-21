@@ -4018,11 +4018,12 @@ const READONLY_AGENT_DISALLOWED_TOOLS: Record<string, string> = {
 
 // Pass-through agent formats (including converter:null) still need to drop
 // Claude-only keys. Limit removal to frontmatter so prompt examples survive.
+// The closing fence must start its own line: a `---` inside a value is not a fence.
 function stripClaudeOnlyAgentFrontmatter(content: string): string {
-  if (!content.startsWith('---')) return content;
-  const endIndex = content.indexOf('---', 3);
-  if (endIndex === -1) return content;
-  return content.slice(0, endIndex).replace(/^omitClaudeMd:[^\r\n]*\r?\n/gm, '') + content.slice(endIndex);
+  const match = /^﻿?---\r?\n[\s\S]*?\r?\n(?=---(?:\r?\n|$))/.exec(content);
+  if (!match) return content;
+  const head = match[0];
+  return head.replace(/^omitClaudeMd:[^\r\n]*\r?\n/gm, '') + content.slice(head.length);
 }
 
 /**
