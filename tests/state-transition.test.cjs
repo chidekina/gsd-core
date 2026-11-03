@@ -2016,6 +2016,72 @@ describe('ADR-1769 Phase 5: milestoneComplete transition — closure write', () 
       'stale Operator Next Steps tail must be replaced');
   });
 
+  describe('Phase 174: Operator Next Steps keeps operator content, drops only the stale re-run line', () => {
+    const TEMPLATE = '- Start the next milestone with /gsd:new-milestone';
+    const OPEN = [
+      '- Decide whether 999.52 ships in v2.24',
+      '- Answer ADR-0137 Q2',
+      '- Rotate the deploy key',
+      '- Confirm the HUD item is closed',
+      '- Review issue #458',
+      '- Ask finance about the budget alert',
+    ];
+
+    function bodyWith(opLines, tail = '') {
+      return preCloseBody().replace(
+        '## Operator Next Steps\n\n- Re-run /gsd:complete-milestone v1.0\n',
+        `## Operator Next Steps\n\n${opLines.join('\n')}\n${tail}`,
+      );
+    }
+
+    function opSection(content) {
+      const { collectSection } = require('../gsd-core/bin/lib/markdown-sectionizer.cjs');
+      const section = collectSection(
+        content.replace(/\r\n/g, '\n'),
+        (h) => h.level === 2 && /^operator\s+next\s+steps$/i.test(h.text),
+      );
+      return section ? section.body.split('\n').filter((l) => l.trim() !== '') : null;
+    }
+
+    test('N operator lines survive, the stale line goes, one template line is last', () => {
+      const input = bodyWith(['- Re-run /gsd:complete-milestone v1.0', ...OPEN]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, TEMPLATE]);
+    });
+
+    test('only the stale line: only the template line remains', () => {
+      const lines = opSection(transitionCore(preCloseBody(), intent, deps).content);
+      assert.deepStrictEqual(lines, [TEMPLATE]);
+    });
+
+    test('a template line already present is not duplicated', () => {
+      const input = bodyWith([...OPEN, TEMPLATE]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, TEMPLATE]);
+    });
+
+    test('section boundary: the next heading and its body are untouched', () => {
+      const input = bodyWith(OPEN, '\n## Accumulated Context\n\n- keep this decision\n');
+      const { content } = transitionCore(input, intent, deps);
+      assert.deepStrictEqual(opSection(content), [...OPEN, TEMPLATE]);
+      assert.ok(/## Accumulated Context\n\n- keep this decision\n/.test(content));
+    });
+
+    test('CRLF input, normalized to LF, equals the LF result', () => {
+      const input = bodyWith(['- Re-run /gsd:complete-milestone v1.0', ...OPEN]);
+      const lf = transitionCore(input, intent, deps);
+      const crlf = transitionCore(input.replace(/\n/g, '\r\n'), intent, deps);
+      assert.strictEqual(crlf.content.replace(/\r\n/g, '\n'), lf.content);
+      assert.deepStrictEqual(opSection(crlf.content), [...OPEN, TEMPLATE]);
+    });
+
+    test('no Operator Next Steps section: it is appended with the template line', () => {
+      const input = preCloseBody().replace(/\n## Operator Next Steps[\s\S]*$/, '\n');
+      const { content } = transitionCore(input, intent, deps);
+      assert.deepStrictEqual(opSection(content), [TEMPLATE]);
+    });
+  });
+
   test('#2245 F7: CRLF blank line after a reset heading is preserved (byte-parity with LF)', () => {
     // resetSectionVerbatim's post-heading blank-swallow loop recognised only
     // a bare `\n` — on a CRLF document, a `\r\n` blank line right after the

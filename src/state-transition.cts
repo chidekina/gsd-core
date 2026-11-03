@@ -2507,10 +2507,10 @@ function milestoneSwitchCore(
  * retired regex's `pattern.test(body)` miss) — callers fall back to their own
  * append-a-new-section path.
  */
-function resetSectionVerbatim(
+function rewriteSectionBody(
   content: string,
   headingPredicate: (heading: HeadingToken) => boolean,
-  newBody: string,
+  rewrite: (oldBody: string) => string,
 ): string | null {
   const headings = tokenizeHeadings(content);
   const idx = headings.findIndex(headingPredicate);
@@ -2544,7 +2544,33 @@ function resetSectionVerbatim(
     if (STOP_H2_PLUS(headings[j].level)) { bodyEnd = headings[j].offset - 1; break; }
   }
 
-  return content.slice(0, bodyStart) + newBody + content.slice(bodyEnd);
+  return content.slice(0, bodyStart) + rewrite(content.slice(bodyStart, bodyEnd)) + content.slice(bodyEnd);
+}
+
+/** `rewriteSectionBody` with a fixed replacement: the old body is discarded. */
+function resetSectionVerbatim(
+  content: string,
+  headingPredicate: (heading: HeadingToken) => boolean,
+  newBody: string,
+): string | null {
+  return rewriteSectionBody(content, headingPredicate, () => newBody);
+}
+
+/**
+ * Phase 174 (GSDFIX-01): the Operator Next Steps body after a milestone close.
+ * Keeps every operator line, drops only the stale "re-run complete-milestone"
+ * instruction (/complete-milestone/i), and ends with the next-milestone line
+ * once. Same edge blank lines as `resetSectionVerbatim`'s old template.
+ */
+function operatorStepsAfterClose(oldBody: string, templateLine: string): string {
+  const kept = oldBody
+    .split('\n')
+    .map((l) => l.replace(/\r$/, ''))
+    .filter((l) => !/complete-milestone/i.test(l));
+  while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
+  while (kept.length > 0 && kept[0].trim() === '') kept.shift();
+  if (!kept.some((l) => l.trim() === templateLine)) kept.push(templateLine);
+  return `\n${kept.join('\n')}\n\n`;
 }
 
 /**
@@ -2632,10 +2658,11 @@ function milestoneCompleteCore(
   updated.push('Current Position');
 
   // ## Operator Next Steps — normalize stale tails that can persist after close.
-  const operatorReset = resetSectionVerbatim(
+  const operatorTemplateLine = `- Start the next milestone with ${intent.nextMilestoneCommand}`;
+  const operatorReset = rewriteSectionBody(
     body,
     (h) => h.level === 2 && /^operator\s+next\s+steps$/i.test(h.text),
-    `\n- Start the next milestone with ${intent.nextMilestoneCommand}\n\n`,
+    (oldBody) => operatorStepsAfterClose(oldBody, operatorTemplateLine),
   );
   if (operatorReset !== null) {
     body = operatorReset;
