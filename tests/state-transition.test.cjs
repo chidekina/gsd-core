@@ -2082,15 +2082,60 @@ describe('ADR-1769 Phase 5: milestoneComplete transition — closure write', () 
       assert.deepStrictEqual(lines, [...OPEN, note, TEMPLATE]);
     });
 
-    test('the stale item goes with its indented continuation lines, not just its first line', () => {
-      const input = bodyWith([
-        '- Re-run /gsd:complete-milestone v1.0',
-        '  because of the audit gap',
-        '  - sub-point of the stale item',
-        ...OPEN,
-      ]);
+    test('continuation lines of the stale item are kept: nothing but the exact stale line is deleted', () => {
+      const cont = ['  because of the audit gap', '  - sub-point of the stale item'];
+      const input = bodyWith(['- Re-run /gsd:complete-milestone v1.0', ...cont, ...OPEN]);
       const lines = opSection(transitionCore(input, intent, deps).content);
-      assert.deepStrictEqual(lines, [...OPEN, TEMPLATE]);
+      assert.deepStrictEqual(lines, [...cont, ...OPEN, TEMPLATE]);
+    });
+
+    test('an operator line that starts like the template but is not the command is kept (- and *)', () => {
+      const own = [
+        '- Start the next milestone with a kickoff call with finance',
+        '* Start the next milestone with the new hire',
+      ];
+      const input = bodyWith(['- Re-run /gsd:complete-milestone v1.0', ...own, ...OPEN]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...own, ...OPEN, TEMPLATE]);
+    });
+
+    test('a note nested under an old template line survives its removal', () => {
+      const note = '  - but ask finance first';
+      const input = bodyWith([...OPEN, '- Start the next milestone with /gsd-new-milestone', note]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, note, TEMPLATE]);
+    });
+
+    test('fences follow CommonMark: a ~~~ line inside a ``` block does not close it', () => {
+      const fenced = ['```', '~~~', '- Re-run /gsd:complete-milestone v1.0', '```'];
+      const input = bodyWith([...OPEN, ...fenced]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, ...fenced, TEMPLATE]);
+    });
+
+    test('a shorter marker does not close a longer fence', () => {
+      const fenced = ['````', '```', '- Re-run /gsd:complete-milestone v1.0', '````'];
+      const input = bodyWith([...OPEN, ...fenced]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, ...fenced, TEMPLATE]);
+    });
+
+    test('a 4-space-indented ``` is code text, not a fence: the stale line after it still goes', () => {
+      const input = bodyWith([...OPEN, '    ```', '- Re-run /gsd:complete-milestone v1.0']);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, '    ```', TEMPLATE]);
+    });
+
+    test('an unclosed fence is idempotent: a second run changes nothing and adds no second template line', () => {
+      const input = bodyWith([...OPEN, '```', '- Re-run /gsd:complete-milestone v1.0']);
+      const first = transitionCore(input, intent, deps).content;
+      const second = transitionCore(first, intent, deps).content;
+      // The pure core adds blank lines on every run (the writer's normalizer collapses them);
+      // compare everything else, so only a changed or duplicated line can fail this.
+      const squash = (s) => s.replace(/\n{3,}/g, '\n\n');
+      assert.strictEqual(squash(second), squash(first));
+      assert.strictEqual(second.split('\n').filter((l) => l.trim() === TEMPLATE).length, 1);
+      assert.strictEqual(first.split('\n').filter((l) => l.trim() === TEMPLATE).length, 1);
     });
 
     test('a fenced block inside the section is kept intact, even if a line in it looks stale', () => {

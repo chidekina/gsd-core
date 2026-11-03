@@ -2558,37 +2558,43 @@ function resetSectionVerbatim(
 
 /**
  * Phase 174 (GSDFIX-01): the Operator Next Steps body after a milestone close.
- * Keeps every operator line. Dropped, outside code fences only: the stale
- * "Re-run ... complete-milestone" list item (with its indented continuation
- * lines) and any earlier "Start the next milestone with ..." line, which the
- * single fresh template line at the end replaces. A line that merely mentions
- * the command (an operator's own note) is kept. Same edge blank lines as
- * `resetSectionVerbatim`'s old template.
+ * Deletes only what the tool itself wrote, and only outside code fences: the
+ * stale "Re-run <cmd>complete-milestone ..." item and an earlier
+ * "Start the next milestone with <cmd>new-milestone" line (replaced by the
+ * fresh template line at the end). Every other line is kept, including
+ * continuation lines of a deleted item: the worst case is a cosmetic orphan
+ * line, never lost operator text. Fences follow CommonMark (opener indented
+ * 0-3, closed by the same character, at least as long, nothing after it).
+ * Same edge blank lines as `resetSectionVerbatim`'s old template.
  */
-const STALE_RERUN_ITEM = /^\s*[-*]\s+re-?run\b.*complete-milestone/i;
-const OLD_TEMPLATE_ITEM = /^\s*[-*]\s+Start the next milestone with /;
+const STALE_RERUN_ITEM = /^ {0,3}[-*]\s+re-?run\s+\S*complete-milestone\b.*$/i;
+const OLD_TEMPLATE_ITEM = /^ {0,3}[-*]\s+Start the next milestone with \S*new-milestone\s*$/;
+const FENCE_OPEN = /^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 
 function operatorStepsAfterClose(oldBody: string, templateLine: string): string {
   const kept: string[] = [];
-  let inFence = false;
-  let droppingItem = false;
+  let fence: string | null = null;
   for (const raw of oldBody.split('\n')) {
     const line = raw.replace(/\r$/, '');
-    if (/^\s*(```|~~~)/.test(line)) {
-      inFence = !inFence;
-      droppingItem = false;
+    if (fence !== null) {
+      const close = FENCE_CLOSE.exec(line);
+      if (close !== null && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
       kept.push(line);
       continue;
     }
-    if (inFence) { kept.push(line); continue; }
-    if (STALE_RERUN_ITEM.test(line) || OLD_TEMPLATE_ITEM.test(line)) { droppingItem = true; continue; }
-    if (droppingItem && /^\s+\S/.test(line)) continue; // continuation of the dropped item
-    droppingItem = false;
+    const open = FENCE_OPEN.exec(line);
+    if (open !== null) {
+      fence = open[1] ?? open[2];
+      kept.push(line);
+      continue;
+    }
+    if (STALE_RERUN_ITEM.test(line) || OLD_TEMPLATE_ITEM.test(line)) continue;
     kept.push(line);
   }
   while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
   while (kept.length > 0 && kept[0].trim() === '') kept.shift();
-  kept.push(templateLine);
+  if (!kept.some((l) => l.trim() === templateLine)) kept.push(templateLine);
   return `\n${kept.join('\n')}\n\n`;
 }
 
