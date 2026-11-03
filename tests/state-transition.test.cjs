@@ -2075,6 +2075,37 @@ describe('ADR-1769 Phase 5: milestoneComplete transition — closure write', () 
       assert.deepStrictEqual(opSection(crlf.content), [...OPEN, TEMPLATE]);
     });
 
+    test('an operator note that merely names complete-milestone is kept', () => {
+      const note = '- Ask finance before running /gsd:complete-milestone v2.0 again';
+      const input = bodyWith(['- Re-run /gsd:complete-milestone v1.0', ...OPEN, note]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, note, TEMPLATE]);
+    });
+
+    test('the stale item goes with its indented continuation lines, not just its first line', () => {
+      const input = bodyWith([
+        '- Re-run /gsd:complete-milestone v1.0',
+        '  because of the audit gap',
+        '  - sub-point of the stale item',
+        ...OPEN,
+      ]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, TEMPLATE]);
+    });
+
+    test('a fenced block inside the section is kept intact, even if a line in it looks stale', () => {
+      const fenced = ['```', '- Re-run /gsd:complete-milestone v1.0', '```'];
+      const input = bodyWith([...OPEN, ...fenced]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, ...fenced, TEMPLATE]);
+    });
+
+    test('a template line from an earlier close with another command is replaced, not stacked', () => {
+      const input = bodyWith([...OPEN, '- Start the next milestone with /gsd-new-milestone']);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, TEMPLATE]);
+    });
+
     test('no Operator Next Steps section: it is appended with the template line', () => {
       const input = preCloseBody().replace(/\n## Operator Next Steps[\s\S]*$/, '\n');
       const { content } = transitionCore(input, intent, deps);

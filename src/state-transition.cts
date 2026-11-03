@@ -2558,18 +2558,37 @@ function resetSectionVerbatim(
 
 /**
  * Phase 174 (GSDFIX-01): the Operator Next Steps body after a milestone close.
- * Keeps every operator line, drops only the stale "re-run complete-milestone"
- * instruction (/complete-milestone/i), and ends with the next-milestone line
- * once. Same edge blank lines as `resetSectionVerbatim`'s old template.
+ * Keeps every operator line. Dropped, outside code fences only: the stale
+ * "Re-run ... complete-milestone" list item (with its indented continuation
+ * lines) and any earlier "Start the next milestone with ..." line, which the
+ * single fresh template line at the end replaces. A line that merely mentions
+ * the command (an operator's own note) is kept. Same edge blank lines as
+ * `resetSectionVerbatim`'s old template.
  */
+const STALE_RERUN_ITEM = /^\s*[-*]\s+re-?run\b.*complete-milestone/i;
+const OLD_TEMPLATE_ITEM = /^\s*[-*]\s+Start the next milestone with /;
+
 function operatorStepsAfterClose(oldBody: string, templateLine: string): string {
-  const kept = oldBody
-    .split('\n')
-    .map((l) => l.replace(/\r$/, ''))
-    .filter((l) => !/complete-milestone/i.test(l));
+  const kept: string[] = [];
+  let inFence = false;
+  let droppingItem = false;
+  for (const raw of oldBody.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      droppingItem = false;
+      kept.push(line);
+      continue;
+    }
+    if (inFence) { kept.push(line); continue; }
+    if (STALE_RERUN_ITEM.test(line) || OLD_TEMPLATE_ITEM.test(line)) { droppingItem = true; continue; }
+    if (droppingItem && /^\s+\S/.test(line)) continue; // continuation of the dropped item
+    droppingItem = false;
+    kept.push(line);
+  }
   while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
   while (kept.length > 0 && kept[0].trim() === '') kept.shift();
-  if (!kept.some((l) => l.trim() === templateLine)) kept.push(templateLine);
+  kept.push(templateLine);
   return `\n${kept.join('\n')}\n\n`;
 }
 
