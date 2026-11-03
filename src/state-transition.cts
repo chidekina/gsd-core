@@ -2507,10 +2507,10 @@ function milestoneSwitchCore(
  * retired regex's `pattern.test(body)` miss) — callers fall back to their own
  * append-a-new-section path.
  */
-function resetSectionVerbatim(
+function rewriteSectionBody(
   content: string,
   headingPredicate: (heading: HeadingToken) => boolean,
-  newBody: string,
+  rewrite: (oldBody: string) => string,
 ): string | null {
   const headings = tokenizeHeadings(content);
   const idx = headings.findIndex(headingPredicate);
@@ -2544,7 +2544,64 @@ function resetSectionVerbatim(
     if (STOP_H2_PLUS(headings[j].level)) { bodyEnd = headings[j].offset - 1; break; }
   }
 
-  return content.slice(0, bodyStart) + newBody + content.slice(bodyEnd);
+  return content.slice(0, bodyStart) + rewrite(content.slice(bodyStart, bodyEnd)) + content.slice(bodyEnd);
+}
+
+/** `rewriteSectionBody` with a fixed replacement: the old body is discarded. */
+function resetSectionVerbatim(
+  content: string,
+  headingPredicate: (heading: HeadingToken) => boolean,
+  newBody: string,
+): string | null {
+  return rewriteSectionBody(content, headingPredicate, () => newBody);
+}
+
+/**
+ * Phase 174 (GSDFIX-01): the Operator Next Steps body after a milestone close.
+ * Deletes only what the tool itself wrote, and only outside code fences: the
+ * stale "Re-run <cmd>complete-milestone ..." item and an earlier
+ * "Start the next milestone with <cmd>new-milestone" line (replaced by the
+ * fresh template line at the end). Every other line is kept, including
+ * continuation lines of a deleted item: the worst case is a cosmetic orphan
+ * line, never lost operator text. Fences follow CommonMark (opener indented
+ * 0-3, closed by the same character, at least as long, nothing after it).
+ * Same edge blank lines as `resetSectionVerbatim`'s old template.
+ */
+const STALE_RERUN_ITEM = /^ {0,3}[-*]\s+re-?run\s+\S*complete-milestone(?![\w-]).*$/i;
+const OLD_TEMPLATE_ITEM = /^ {0,3}[-*]\s+Start the next milestone with \S*new-milestone\s*$/;
+const FENCE_OPEN = /^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+
+function operatorStepsAfterClose(oldBody: string, templateLine: string): string {
+  const kept: string[] = [];
+  let fence: string | null = null;
+  let openFenceLines: string[] = []; // lines of a fence still open at the end of the section
+  for (const raw of oldBody.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (fence !== null) {
+      const close = FENCE_CLOSE.exec(line);
+      if (close !== null && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      kept.push(line);
+      openFenceLines.push(line);
+      continue;
+    }
+    const open = FENCE_OPEN.exec(line);
+    if (open !== null) {
+      fence = open[1] ?? open[2];
+      kept.push(line);
+      openFenceLines = [line];
+      continue;
+    }
+    if (STALE_RERUN_ITEM.test(line) || OLD_TEMPLATE_ITEM.test(line)) continue;
+    kept.push(line);
+  }
+  while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
+  while (kept.length > 0 && kept[0].trim() === '') kept.shift();
+  // Only a copy inside a fence that never closed blocks the append: that keeps an unclosed fence
+  // idempotent. A copy quoted in a closed fence or indented 4+ spaces is operator text, not the template.
+  const templateInOpenFence = fence !== null && openFenceLines.some((l) => l.trim() === templateLine);
+  if (!templateInOpenFence) kept.push(templateLine);
+  return `\n${kept.join('\n')}\n\n`;
 }
 
 /**
@@ -2632,10 +2689,11 @@ function milestoneCompleteCore(
   updated.push('Current Position');
 
   // ## Operator Next Steps — normalize stale tails that can persist after close.
-  const operatorReset = resetSectionVerbatim(
+  const operatorTemplateLine = `- Start the next milestone with ${intent.nextMilestoneCommand}`;
+  const operatorReset = rewriteSectionBody(
     body,
     (h) => h.level === 2 && /^operator\s+next\s+steps$/i.test(h.text),
-    `\n- Start the next milestone with ${intent.nextMilestoneCommand}\n\n`,
+    (oldBody) => operatorStepsAfterClose(oldBody, operatorTemplateLine),
   );
   if (operatorReset !== null) {
     body = operatorReset;
