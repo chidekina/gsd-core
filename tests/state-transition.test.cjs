@@ -2138,6 +2138,30 @@ describe('ADR-1769 Phase 5: milestoneComplete transition — closure write', () 
       assert.strictEqual(first.split('\n').filter((l) => l.trim() === TEMPLATE).length, 1);
     });
 
+    test('an operator line that only starts like the stale item (hyphenated name) is kept', () => {
+      const own = [
+        '- Rerun complete-milestone-checklist with Bob',
+        '- Re-run pre-complete-milestone-x before Friday',
+      ];
+      const input = bodyWith(['- Re-run /gsd:complete-milestone v1.0', ...own, ...OPEN]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...own, ...OPEN, TEMPLATE]);
+    });
+
+    test('the template text quoted in a CLOSED fence does not stop the real template line being written', () => {
+      const quoted = ['```', TEMPLATE, '```'];
+      const input = bodyWith([...OPEN, ...quoted]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, ...quoted, TEMPLATE]);
+    });
+
+    test('a template-looking bullet indented 4+ spaces is operator text and does not stop the real template line', () => {
+      const nested = '    - Start the next milestone with /gsd:new-milestone';
+      const input = bodyWith([...OPEN, nested]);
+      const lines = opSection(transitionCore(input, intent, deps).content);
+      assert.deepStrictEqual(lines, [...OPEN, nested, TEMPLATE]);
+    });
+
     test('a fenced block inside the section is kept intact, even if a line in it looks stale', () => {
       const fenced = ['```', '- Re-run /gsd:complete-milestone v1.0', '```'];
       const input = bodyWith([...OPEN, ...fenced]);
